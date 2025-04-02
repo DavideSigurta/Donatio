@@ -1,59 +1,58 @@
-// This is an example test file. Hardhat will run every *.js file in `test/`,
-// so feel free to add new ones.
+// Questo è un file di test di esempio. Hardhat eseguirà ogni file *.js nella cartella `test/`,
+// quindi sentiti libero di aggiungerne altri.
 
-// Hardhat tests are normally written with Mocha and Chai.
+// I test di Hardhat sono normalmente scritti con Mocha e Chai.
 
-// We import Chai to use its asserting functions here.
+// Importiamo Chai per utilizzare le sue funzioni di asserzione qui.
 const { expect } = require("chai");
 
-// We use `loadFixture` to share common setups (or fixtures) between tests.
-// Using this simplifies your tests and makes them run faster, by taking
-// advantage or Hardhat Network's snapshot functionality.
+// Utilizziamo `loadFixture` per condividere configurazioni comuni (o fixture) tra i test.
+// Questo semplifica i test e li rende più veloci, sfruttando
+// la funzionalità di snapshot della rete Hardhat Network.
 const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
 
-// `describe` is a Mocha function that allows you to organize your tests.
-// Having your tests organized makes debugging them easier. All Mocha
-// functions are available in the global scope.
+// `describe` è una funzione di Mocha che permette di organizzare i test.
+// Avere i test organizzati rende più facile il debug. Tutte le funzioni di Mocha
+// sono disponibili nello scope globale.
 //
-// `describe` receives the name of a section of your test suite, and a
-// callback. The callback must define the tests of that section. This callback
-// can't be an async function.
+// `describe` riceve il nome di una sezione della tua suite di test, e una
+// callback. La callback deve definire i test di quella sezione. Questa callback
+// non può essere una funzione asincrona.
 describe("Token contract", function () {
-  // We define a fixture to reuse the same setup in every test. We use
-  // loadFixture to run this setup once, snapshot that state, and reset Hardhat
-  // Network to that snapshot in every test.
+  // Definiamo una fixture per riutilizzare la stessa configurazione in ogni test.
+  // Utilizziamo loadFixture per eseguire questa configurazione una volta sola, creare uno snapshot
+  // di quello stato e ripristinare Hardhat Network a quello snapshot in ogni test.
   async function deployTokenFixture() {
-    // Get the ContractFactory and Signers here.
+    // Otteniamo qui la ContractFactory e i Signers.
     const Token = await ethers.getContractFactory("Token");
     const [owner, addr1, addr2] = await ethers.getSigners();
 
-    // To deploy our contract, we just have to call Token.deploy() and await
-    // for it to be deployed(), which happens onces its transaction has been
-    // mined.
+    // Per deployare il nostro contratto, dobbiamo solo chiamare Token.deploy() e attendere
+    // che venga deployato(), cosa che avviene una volta che la sua transazione è stata
+    // minata.
     const hardhatToken = await Token.deploy();
 
     await hardhatToken.deployed();
 
-    // Fixtures can return anything you consider useful for your tests
+    // Le fixture possono restituire qualsiasi cosa ritieni utile per i tuoi test
     return { Token, hardhatToken, owner, addr1, addr2 };
   }
 
-  // You can nest describe calls to create subsections.
+  // Puoi annidare chiamate describe per creare sottosezioni.
   describe("Deployment", function () {
-    // `it` is another Mocha function. This is the one you use to define your
-    // tests. It receives the test name, and a callback function.
-//
-    // If the callback function is async, Mocha will `await` it.
+    // `it` è un'altra funzione di Mocha. Questa è quella che usi per definire i
+    // tuoi test. Riceve il nome del test e una funzione di callback.
+    // Se la funzione di callback è asincrona, Mocha la attenderà con `await`.
     it("Should set the right owner", async function () {
-      // We use loadFixture to setup our environment, and then assert that
-      // things went well
+      // Utilizziamo loadFixture per configurare il nostro ambiente, e poi verifichiamo che
+      // tutto sia andato bene
       const { hardhatToken, owner } = await loadFixture(deployTokenFixture);
 
-      // Expect receives a value and wraps it in an assertion object. These
-      // objects have a lot of utility methods to assert values.
+      // Expect riceve un valore e lo avvolge in un oggetto di asserzione. Questi
+      // oggetti hanno molti metodi utili per fare asserzioni sui valori.
 
-      // This test expects the owner variable stored in the contract to be
-      // equal to our Signer's owner.
+      // Questo test si aspetta che la variabile owner memorizzata nel contratto sia
+      // uguale all'owner del nostro Signer.
       expect(await hardhatToken.owner()).to.equal(owner.address);
     });
 
@@ -67,12 +66,12 @@ describe("Token contract", function () {
   describe("Transactions", function () {
     it("Should transfer tokens between accounts", async function () {
       const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
-      // Transfer 50 tokens from owner to addr1
+      // Trasferisce 50 token da owner a addr1
       await expect(hardhatToken.transfer(addr1.address, 50))
         .to.changeTokenBalances(hardhatToken, [owner, addr1], [-50, 50]);
 
-      // Transfer 50 tokens from addr1 to addr2
-      // We use .connect(signer) to send a transaction from another account
+      // Trasferisce 50 token da addr1 a addr2
+      // Utilizziamo .connect(signer) per inviare una transazione da un altro account
       await expect(hardhatToken.connect(addr1).transfer(addr2.address, 50))
         .to.changeTokenBalances(hardhatToken, [addr1, addr2], [-50, 50]);
     });
@@ -80,12 +79,12 @@ describe("Token contract", function () {
     it("should emit Transfer events", async function () {
       const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
 
-      // Transfer 50 tokens from owner to addr1
+      // Trasferisce 50 token da owner a addr1
       await expect(hardhatToken.transfer(addr1.address, 50))
         .to.emit(hardhatToken, "Transfer").withArgs(owner.address, addr1.address, 50)
 
-      // Transfer 50 tokens from addr1 to addr2
-      // We use .connect(signer) to send a transaction from another account
+      // Trasferisce 50 token da addr1 a addr2
+      // Utilizziamo .connect(signer) per inviare una transazione da un altro account
       await expect(hardhatToken.connect(addr1).transfer(addr2.address, 50))
         .to.emit(hardhatToken, "Transfer").withArgs(addr1.address, addr2.address, 50)
     });
@@ -96,16 +95,92 @@ describe("Token contract", function () {
         owner.address
       );
 
-      // Try to send 1 token from addr1 (0 tokens) to owner (1000 tokens).
-      // `require` will evaluate false and revert the transaction.
+      // Prova a inviare 1 token da addr1 (0 token) all'owner (1000 token).
+      // `require` valuterà false e annullerà la transazione.
       await expect(
         hardhatToken.connect(addr1).transfer(owner.address, 1)
       ).to.be.revertedWith("Not enough tokens");
 
-      // Owner balance shouldn't have changed.
+      // Il saldo dell'owner non dovrebbe essere cambiato.
       expect(await hardhatToken.balanceOf(owner.address)).to.equal(
         initialOwnerBalance
       );
     });
   });
+
+  describe("Allowances", function () {
+    it("Should update allowances when approve is called", async function () {
+      const { hardhatToken, owner, addr1 } = await loadFixture(deployTokenFixture);
+      
+      await hardhatToken.approve(addr1.address, 100);
+      expect(await hardhatToken.allowance(owner.address, addr1.address)).to.equal(100);
+    });
+
+    it("Should emit Approval event when approve is called", async function () {
+      const { hardhatToken, owner, addr1 } = await loadFixture(deployTokenFixture);
+      
+      await expect(hardhatToken.approve(addr1.address, 100))
+        .to.emit(hardhatToken, "Approval")
+        .withArgs(owner.address, addr1.address, 100);
+    });
+
+    it("Should allow transferFrom when sender has enough allowance", async function () {
+      const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
+      
+      // L'owner approva addr1 a spendere 100 token
+      await hardhatToken.approve(addr1.address, 100);
+      
+      // addr1 trasferisce 50 token dall'owner a addr2
+      await expect(hardhatToken.connect(addr1).transferFrom(owner.address, addr2.address, 50))
+        .to.changeTokenBalances(hardhatToken, [owner, addr2], [-50, 50]);
+        
+      // Verifica che l'allowance sia stata ridotta
+      expect(await hardhatToken.allowance(owner.address, addr1.address)).to.equal(50);
+    });
+
+    it("Should fail transferFrom when sender has insufficient allowance", async function () {
+      const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
+      
+      // L'owner approva addr1 a spendere 50 token
+      await hardhatToken.approve(addr1.address, 50);
+      
+      // addr1 tenta di trasferire 100 token dall'owner a addr2
+      await expect(
+        hardhatToken.connect(addr1).transferFrom(owner.address, addr2.address, 100)
+      ).to.be.revertedWith("Not enough allowance");
+    });
+
+    it("Should fail transferFrom when token owner has insufficient balance", async function () {
+      const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
+      
+      // Trasferisce tutti i token dall'owner a addr1
+      const totalSupply = await hardhatToken.totalSupply();
+      await hardhatToken.transfer(addr1.address, totalSupply);
+      
+      // L'owner ora ha 0 token ma approva addr2 a spendere 100 token
+      await hardhatToken.approve(addr2.address, 100);
+      
+      // addr2 tenta di trasferire dall'owner (che ha 0 token)
+      await expect(
+        hardhatToken.connect(addr2).transferFrom(owner.address, addr2.address, 100)
+      ).to.be.revertedWith("Not enough tokens");
+    });
+  });
+
+  describe("Token Properties", function () {
+    it("Should have correct name and symbol", async function () {
+      const { hardhatToken } = await loadFixture(deployTokenFixture);
+      
+      expect(await hardhatToken.name()).to.equal("Donatio");
+      expect(await hardhatToken.symbol()).to.equal("DNT");
+    });
+    
+    it("Should have correct total supply", async function () {
+      const { hardhatToken } = await loadFixture(deployTokenFixture);
+      
+      const expectedTotalSupply = 1000000000; // 1 miliardo di token come specificato nel contratto
+      expect(await hardhatToken.totalSupply()).to.equal(expectedTotalSupply);
+    });
+  });
 });
+
