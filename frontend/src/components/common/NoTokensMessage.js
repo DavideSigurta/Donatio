@@ -1,6 +1,9 @@
 import React from "react";
+import { useWeb3 } from "../../contexts/Web3Context";
 
-export function NoTokensMessage({ selectedAddress }) {
+export function NoTokensMessage() {
+  const { selectedAddress } = useWeb3();
+  
   return (
     <>
       <p>You don't have tokens to transfer</p>

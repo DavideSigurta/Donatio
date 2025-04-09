@@ -20,7 +20,7 @@ contract TokenExchange {
     // Indirizzo del proprietario del contratto (deployer)
     address public owner;
     
-    // Tasso di cambio: 1 ETH = 100 DNT
+    // Tasso di cambio: 1 ETH = 100 DNT (ora con 18 decimali come ETH)
     uint256 public rate = 100;
 
     // EVENTI
@@ -60,7 +60,8 @@ contract TokenExchange {
         require(msg.value > 0, "Invia ETH per comprare token");
         
         // Calcola quanti token dare in base agli ETH inviati
-        uint256 tokenAmount = (msg.value * rate) / 1e18;
+        // MODIFICATO: non divide più per 1e18 perché ora i token hanno 18 decimali come ETH
+        uint256 tokenAmount = msg.value * rate;
         
         // Verifica disponibilità token
         require(token.balanceOf(owner) >= tokenAmount, "L'owner non ha abbastanza token");
@@ -94,7 +95,8 @@ contract TokenExchange {
         require(tokenAmount > 0, "Specifica la quantita di token da vendere");
         
         // Calcola quanti ETH dare in cambio
-        uint256 ethAmount = (tokenAmount * 1e18) / rate;
+        // MODIFICATO: non moltiplica più per 1e18 perché ora i token hanno 18 decimali come ETH
+        uint256 ethAmount = tokenAmount / rate;
         
         // Verifica che ci sia abbastanza ETH nel contratto
         require(address(this).balance >= ethAmount, "Non c'e abbastanza ETH nel contratto");
@@ -119,7 +121,7 @@ contract TokenExchange {
         (bool sent, ) = payable(msg.sender).call{value: ethAmount}("");
         require(sent, "Trasferimento ETH all'utente fallito");
     }
-    
+        
     /**
      * @dev Funzione per l'owner per depositare ETH nel contratto
      */

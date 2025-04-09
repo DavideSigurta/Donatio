@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Dapp } from "./components/Dapp";
+import { Web3Provider } from "./contexts/Web3Context";
 
 // We import bootstrap here, but you can remove if you want
 import "bootstrap/dist/css/bootstrap.css";
@@ -12,6 +13,8 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 
 root.render(
   <React.StrictMode>
-    <Dapp />
+    <Web3Provider>
+      <Dapp />
+    </Web3Provider>
   </React.StrictMode>
 );

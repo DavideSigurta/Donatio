@@ -178,8 +178,16 @@ describe("Token contract", function () {
     it("Should have correct total supply", async function () {
       const { hardhatToken } = await loadFixture(deployTokenFixture);
       
-      const expectedTotalSupply = 1000000000; // 1 miliardo di token come specificato nel contratto
+      // Ora 1 miliardo di token ma con 18 decimali (1 * 10^9 * 10^18)
+      const expectedTotalSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from("10").pow(18));
       expect(await hardhatToken.totalSupply()).to.equal(expectedTotalSupply);
+    });
+  
+    it("Should have 18 decimals", async function () {
+      const { hardhatToken } = await loadFixture(deployTokenFixture);
+      
+      // Verifica che il token abbia 18 decimali
+      expect(await hardhatToken.decimals()).to.equal(18);
     });
   });
 });

@@ -39,7 +39,7 @@ async function main() {
   // 6. Deposit ETH to the exchange for selling tokens
   const depositTx = await exchange.depositETH({value: hre.ethers.utils.parseEther("1000")});
   await depositTx.wait();
-  console.log("Deposited 1 ETH to the exchange");
+  console.log("Deposited 1000 ETH to the exchange");
 
   // 7. Save contract info for the frontend
   const contractsDir = path.join(__dirname, "..", "frontend", "src", "contracts");
