@@ -6,7 +6,7 @@ import { formatEtherValue, formatTokenValue, formatDate } from '../../utils/form
  * Componente che mostra la cronologia delle transazioni dell'utente
  * Utilizza il Web3Context e le funzioni di formattazione universali
  */
-export function TransactionHistory() {
+export function TransactionHistory({customTransactions, customIsLoading}) {
     // Utilizza il context per ottenere i dati necessari
     const { 
         transactions, 
@@ -14,18 +14,22 @@ export function TransactionHistory() {
         tokenData
     } = useWeb3();
     
+    // Utilizza props personalizzate se fornite, altrimenti usa il context
+    const displayTransactions = customTransactions !== undefined ? customTransactions : transactions;
+    const displayIsLoading = customIsLoading !== undefined ? customIsLoading : isLoading;
+    
     const tokenSymbol = tokenData?.symbol || 'DNT';
     const contractAddress = tokenData?.exchangeAddress;
     
     // Se non ci sono transazioni e non sta caricando, mostra messaggio
-    if (!isLoading && (!transactions || transactions.length === 0)) {
+    if (!displayIsLoading && (!displayTransactions || displayTransactions.length === 0)) {
         return (
             <div className="card mt-4 shadow">
                 <div className="card-header bg-light">
                     <h5 className="mb-0">Le tue transazioni</h5>
                 </div>
                 <div className="card-body text-center py-4">
-                    <p className="mb-0 text-muted">Non hai ancora effettuato transazioni.</p>
+                    <p className="mb-0 text-muted">Non hai transazioni corrispondenti ai filtri selezionati.</p>
                 </div>
             </div>
         );
@@ -33,11 +37,9 @@ export function TransactionHistory() {
     
     return (
         <div className="card mt-4 shadow">
-            <div className="card-header bg-light">
-                <h5 className="mb-0">Le tue transazioni</h5>
-            </div>
+
             <div className="card-body p-0">
-                {isLoading ? (
+                {displayIsLoading ? (
                     <div className="text-center py-4">
                         <div className="spinner-border text-primary" role="status">
                             <span className="visually-hidden">Caricamento...</span>
@@ -46,7 +48,7 @@ export function TransactionHistory() {
                     </div>
                 ) : (
                     <div className="transactions-container" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                        {transactions.map((tx, index) => (
+                        {displayTransactions.map((tx, index) => (
                             <div key={index} className="transaction-box border-bottom mb-3">
                                 {/* Sezione con gli indirizzi */}
                                 <div className="address-section p-3">
@@ -73,32 +75,47 @@ export function TransactionHistory() {
                                             </div>
                                         </div>
                                         <div className="col-md-2">
-                                            <div className="mb-2">
-                                                <small className="text-muted d-block">Tipo:</small>
-                                                {tx.type === 'buy' ? (
-                                                    <span className="badge bg-primary">Acquisto</span>
-                                                ) : (
-                                                    <span className="badge bg-success">Vendita</span>
-                                                )}
-                                            </div>
+                                        <div className="mb-2">
+                                            <small className="text-muted d-block">Tipo:</small>
+                                            {tx.type === 'buy' ? (
+                                                <span className="text-white badge bg-primary">Acquisto</span>
+                                            ) : tx.type === 'sell' ? (
+                                                <span className="badge bg-success">Vendita</span>
+                                            ) : tx.type === 'donation' ? (
+                                                <span className="badge bg-info">Donazione</span>
+                                            ) : tx.type === 'milestone-release' ? (
+                                                <span className="badge bg-warning">Rilascio Milestone</span>
+                                            ) : (
+                                                <span className="badge bg-secondary">{tx.type}</span>
+                                            )}
+                                        </div>
                                         </div>
                                         <div className="col-md-3">
-                                            <div className="mb-2">
-                                                <small className="text-muted d-block">Token:</small>
-                                                {tx.type === 'buy' ? (
-                                                    <span className="text-success">+{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
-                                                ) : (
-                                                    <span className="text-danger">-{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
-                                                )}
-                                            </div>
+                                        <div className="mb-2">
+                                            <small className="text-muted d-block">Token:</small>
+                                            {tx.type === 'buy' ? (
+                                                <span className="text-success">+{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
+                                            ) : tx.type === 'donation' ? (
+                                                <span className="text-danger">-{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
+                                            ) : tx.type === 'sell' ? (
+                                                <span className="text-danger">-{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
+                                            ) : tx.type === 'milestone-release' ? (
+                                                <span className="text-success">+{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
+                                            ) : (
+                                                <span>-</span>
+                                            )}
                                         </div>
+                                        </div>
+
                                         <div className="col-md-3">
                                             <div className="mb-2">
                                                 <small className="text-muted d-block">ETH:</small>
                                                 {tx.type === 'buy' ? (
                                                     <span className="text-danger">-{formatEtherValue(tx.ethAmount)}</span>
-                                                ) : (
+                                                ) : tx.type === 'sell' ? (
                                                     <span className="text-success">+{formatEtherValue(tx.ethAmount)}</span>
+                                                ) : (
+                                                    <span>-</span>
                                                 )}
                                             </div>
                                         </div>
@@ -106,13 +123,19 @@ export function TransactionHistory() {
                                     
                                     {/* Descrizione del flusso di valore */}
                                     <div className="mt-2 pt-2 border-top">
-                                        <small className="text-muted">
-                                            {tx.type === 'buy' ? (
-                                                `Hai inviato ${formatEtherValue(tx.ethAmount)} ETH e ricevuto ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol}`
-                                            ) : (
-                                                `Hai inviato ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} e ricevuto ${formatEtherValue(tx.ethAmount)} ETH`
-                                            )}
-                                        </small>
+                                    <small className="text-muted">
+                                        {tx.type === 'buy' ? (
+                                            `Hai inviato ${formatEtherValue(tx.ethAmount)} ETH e ricevuto ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol}`
+                                        ) : tx.type === 'sell' ? (
+                                            `Hai inviato ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} e ricevuto ${formatEtherValue(tx.ethAmount)} ETH`
+                                        ) : tx.type === 'donation' ? (
+                                            `Hai donato ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} a una campagna`
+                                        ) : tx.type === 'milestone-release' ? (
+                                            `Hai ricevuto ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} dal rilascio di una milestone`
+                                        ) : (
+                                            `Transazione di tipo ${tx.type}`
+                                        )}
+                                    </small>
                                     </div>
                                 </div>
                             </div>

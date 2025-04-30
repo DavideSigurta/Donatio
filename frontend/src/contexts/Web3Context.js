@@ -1,14 +1,20 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import web3Service from '../services/Web3Service';
 import tokenService from '../services/TokenService';
 import exchangeService from '../services/ExchangeService';
 import transactionService from '../services/TransactionService';
+import campaignFactoryService from '../services/CampaignFactoryService';
+import campaignService from '../services/CampaignService';
+import creatorRequestManagerService from "../services/CreatorRequestManagerService";
+import CreatorRequestManagerArtifact from "../contracts/CreatorRequestManager.json";
 
 // Importazione degli artifact
 import TokenArtifact from "../contracts/Token.json";
 import TokenExchangeArtifact from "../contracts/TokenExchange.json";
 import TransactionRegistryArtifact from "../contracts/TransactionRegistry.json";
+import CampaignFactoryArtifact from '../contracts/CampaignFactory.json';
+import CampaignArtifact from '../contracts/Campaign.json';
 import contractAddress from "../contracts/contract-address.json";
 
 // Costante per identificare la rete Hardhat locale
@@ -43,6 +49,17 @@ export function Web3Provider({ children }) {
     // Stato per le transazioni globali
     const [globalTransactions, setGlobalTransactions] = useState([]);
     const [globalTransactionsLoading, setGlobalTransactionsLoading] = useState(true);
+    const [campaigns, setCampaigns] = useState([]);
+    const [userCampaigns, setUserCampaigns] = useState([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(true);
+    const [userCampaignsLoading, setUserCampaignsLoading] = useState(true);
+    const [isAuthorizedCreator, setIsAuthorizedCreator] = useState(false);
+    const [creatorRequest, setCreatorRequest] = useState(null);
+    const [pendingRequests, setPendingRequests] = useState([]);
+    const [pendingRequestsLoading, setPendingRequestsLoading] = useState(true);
+    const [campaignMilestones, setCampaignMilestones] = useState({});
+    const [milestonesLoading, setMilestonesLoading] = useState({});
+    
     
     // Inizializza ethers, i contratti e recupera i dati iniziali
     const initialize = async (userAddress) => {
@@ -59,6 +76,11 @@ export function Web3Provider({ children }) {
             window.tokenService = tokenService;
             await exchangeService.initialize(contractAddress.TokenExchange, TokenExchangeArtifact);
             await transactionService.initialize(contractAddress.TransactionRegistry, TransactionRegistryArtifact);
+            await campaignFactoryService.initialize(contractAddress.CampaignFactory, CampaignFactoryArtifact);
+            await creatorRequestManagerService.initialize(contractAddress.CreatorRequestManager, CreatorRequestManagerArtifact);
+
+            await campaignService.initializeMilestoneManager();
+            
             
             // Carica i dati del token
             const token = tokenService.contract;
@@ -79,6 +101,8 @@ export function Web3Provider({ children }) {
             // Carica il rate di scambio
             const exchangeRate = await exchangeService.getExchangeRate();
             
+            
+            
             // Aggiorna lo stato con i dati recuperati
             setState(prevState => ({
                 ...prevState,
@@ -96,6 +120,16 @@ export function Web3Provider({ children }) {
             
             // Carica le transazioni dell'utente
             await loadTransactions(userAddress);
+            
+            // Verifica se l'utente è autorizzato a creare campagne
+            const authorized = await campaignFactoryService.isAuthorizedCreator(userAddress);
+            setIsAuthorizedCreator(authorized);
+            
+            // Carica le campagne create dall'utente
+            await loadCampaigns();
+
+            // Carica lo stato della richiesta dell'utente
+            await loadCreatorRequestStatus();
             
             // Se l'utente è owner, carica anche i saldi del contratto e le transazioni globali
             if (isOwner) {
@@ -197,21 +231,23 @@ export function Web3Provider({ children }) {
             
             // Filtra le transazioni dell'utente e le formatta
             const userTransactions = response.transactions
-                .filter(tx => tx.user.toLowerCase() === userAddress.toLowerCase())
-                .map(tx => {
-                    // Determina il tipo di transazione
-                    let type = 'unknown';
-                    if (tx.transactionType === 0) type = 'buy';  // EXCHANGE_BUY
-                    else if (tx.transactionType === 1) type = 'sell'; // EXCHANGE_SELL
-                    else if (tx.transactionType === 2) type = 'deposit'; // ETH_DEPOSIT
-                    
-                    return {
-                        type: type,
-                        tokenAmount: tx.tokenAmount,
-                        ethAmount: tx.etherAmount,
-                        timestamp: tx.timestamp
-                    };
-                }).sort((a, b) => b.timestamp - a.timestamp);
+            .filter(tx => tx.user.toLowerCase() === userAddress.toLowerCase())
+            .map(tx => {
+                // Determina il tipo di transazione
+                let type = 'unknown';
+                if (tx.transactionType === 0) type = 'buy';         // EXCHANGE_BUY
+                else if (tx.transactionType === 1) type = 'sell';   // EXCHANGE_SELL
+                else if (tx.transactionType === 2) type = 'deposit'; // ETH_DEPOSIT
+                else if (tx.transactionType === 3) type = 'donation'; // DONATION
+                else if (tx.transactionType === 4) type = 'milestone-release'; // MILESTONE_RELEASE
+                
+                return {
+                    type: type,
+                    tokenAmount: tx.tokenAmount,
+                    ethAmount: tx.etherAmount,
+                    timestamp: tx.timestamp
+                };
+            }).sort((a, b) => b.timestamp - a.timestamp);
             
             // Aggiorna lo stato
             setState(prevState => ({
@@ -259,7 +295,7 @@ export function Web3Provider({ children }) {
             
             // Elabora e formatta le transazioni
             const formattedTransactions = response.transactions.map(tx => {
-                // TransactionType: 0=EXCHANGE_BUY, 1=EXCHANGE_SELL, 2=ETH_DEPOSIT, 3=TOKEN_WITHDRAW, 4=ETH_WITHDRAW
+                // TransactionType: 0=EXCHANGE_BUY, 1=EXCHANGE_SELL, 2=ETH_DEPOSIT, 3=DONATION, 4=MILESTONE_RELEASE
                 let type = 'unknown';
                 
                 if (tx.transactionType === 0) {
@@ -269,9 +305,9 @@ export function Web3Provider({ children }) {
                 } else if (tx.transactionType === 2) {
                     type = 'deposit'; // ETH_DEPOSIT
                 } else if (tx.transactionType === 3) {
-                    type = 'withdraw-token'; // TOKEN_WITHDRAW
+                    type = 'donation'; // DONATION
                 } else if (tx.transactionType === 4) {
-                    type = 'withdraw-eth'; // ETH_WITHDRAW
+                    type = 'milestone-release'; // MILESTONE_RELEASE
                 }
                 
                 return {
@@ -285,7 +321,7 @@ export function Web3Provider({ children }) {
             
             // Ordina per timestamp decrescente (più recenti prima)
             const sortedTransactions = formattedTransactions
-                .sort((a, b) => b.timestamp - a.timestamp);
+            .sort((a, b) => b.timestamp - a.timestamp);
             
             setGlobalTransactions(sortedTransactions);
             
@@ -409,7 +445,7 @@ export function Web3Provider({ children }) {
             if (contractEthBal.lt(ethAmountExpected)) {
                 throw new Error("Non c'è abbastanza ETH nel contratto per completare questa vendita.");
             }
-                
+            
             // Procedi con approvazione
             const approveReceipt = await tokenService.approve(contractAddress.TokenExchange, amount);
             
@@ -504,6 +540,290 @@ export function Web3Provider({ children }) {
         return error.message;
     };
     
+    // Caricamento campagne
+    const loadCampaigns = useCallback(async () => {
+        setCampaignsLoading(true);
+        try {
+            console.log("Caricamento campagne...");
+            
+            // Se non c'è un indirizzo selezionato, inizializziamo solo il provider senza signer
+            if (!state.selectedAddress) {
+                // Inizializza un provider di sola lettura se non è già inizializzato
+                if (!web3Service.provider) {
+                    await web3Service.initializeReadOnly();
+                }
+                
+                if (!campaignFactoryService.contract) {
+                    await campaignFactoryService.initializeReadOnly(contractAddress.CampaignFactory, CampaignFactoryArtifact);
+                }
+            } else if (!campaignFactoryService.contract) {
+                // Se l'utente è connesso ma il contratto non è inizializzato, lo inizializziamo normalmente
+                await campaignFactoryService.initialize(contractAddress.CampaignFactory, CampaignFactoryArtifact);
+            }
+            
+            // Verificare che il contratto sia ora inizializzato
+            if (!campaignFactoryService.contract) {
+                throw new Error("Impossibile inizializzare il contratto CampaignFactory");
+            }
+            
+            const addresses = await campaignFactoryService.getAllCampaigns();
+            console.log("Indirizzi campagne recuperati:", addresses);
+            
+            const campaignList = [];
+            
+            for (const address of addresses) {
+                // Inizializza la campagna in modalità di sola lettura se l'utente non è connesso
+                if (!state.selectedAddress) {
+                    await campaignService.initializeCampaignReadOnly(address, CampaignArtifact);
+                } else {
+                    await campaignService.initializeCampaign(address, CampaignArtifact);
+                }
+                const details = await campaignService.getCampaignDetails(address);
+                campaignList.push(details);
+            }
+            
+            setCampaigns(campaignList);
+        } catch (error) {
+            console.error("Errore nel caricamento delle campagne", error);
+            // Imposta l'array delle campagne come vuoto in caso di errore
+            setCampaigns([]);
+        } finally {
+            setCampaignsLoading(false);
+        }
+    }, [campaignFactoryService, campaignService, state.selectedAddress, web3Service]);
+    
+    const makeDonation = async (campaignAddress, amount, message = "") => {
+        try {
+            console.log(`Donazione di ${amount} DNT a ${campaignAddress}`);
+            console.log(`Messaggio: "${message}"`);
+            
+            // Converti l'importo in wei (18 decimali)
+            const amountWei = ethers.utils.parseEther(amount.toString());
+            console.log(`Importo in wei: ${amountWei.toString()}`);
+            
+            // Verifica se la campagna è inizializzata, altrimenti la inizializza
+            if (!campaignService.campaigns[campaignAddress]) {
+                console.log("Inizializzazione campagna...");
+                await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
+            }
+            
+            // Prima approva il contratto della campagna a spendere i token
+            console.log("Approvazione token...");
+            const approveTx = await tokenService.approve(campaignAddress, amount);
+            console.log("Token approvati, transaction hash:", approveTx.transactionHash);
+            
+            // Poi effettua la donazione
+            const signedCampaign = campaignService.getSignedCampaign(campaignAddress);
+            console.log("Chiamata alla funzione donate con parametri:", {
+                amountWei: amountWei.toString(),
+                message: message,
+                gasLimit: 500000
+            });
+            
+            const tx = await signedCampaign.donate(amountWei, message, { 
+                gasLimit: 500000 
+            });
+            console.log("Donazione inviata, transaction hash:", tx.hash);
+            
+            const receipt = await tx.wait();
+            console.log("Donazione confermata:", receipt);
+            
+            // Aggiorna le transazioni dell'utente dopo la donazione
+            await loadTransactions(state.selectedAddress);
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore durante la donazione:", error);
+            // Aggiungi dettagli più specifici sull'errore
+            if (error.error && error.error.message) {
+                console.error("Messaggio errore specifico:", error.error.message);
+            }
+            throw error;
+        }
+    };
+    
+    // Dopo il metodo makeDonation (riga 527)
+    // Invia una richiesta per diventare creatore autorizzato
+    const submitCreatorRequest = async (description) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Invio richiesta..." }));
+            
+            const result = await creatorRequestManagerService.submitCreatorRequest(description);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: result.receipt.transactionHash }));
+            
+            // Carica lo stato aggiornato della richiesta
+            await loadCreatorRequestStatus();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return result;
+        } catch (error) {
+            console.error("Errore nell'invio della richiesta:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
+    
+    // Carica lo stato della richiesta dell'utente corrente
+    const loadCreatorRequestStatus = async () => {
+        try {
+            if (!state.selectedAddress) return;
+            
+            const request = await creatorRequestManagerService.getCreatorRequest();
+            setCreatorRequest(request);
+            
+            // Se la richiesta è stata approvata, aggiorniamo anche lo stato di autorizzazione
+            if (request && request.processed && request.approved) {
+                setIsAuthorizedCreator(true);
+            }
+            
+            return request;
+        } catch (error) {
+            console.error("Errore nel caricamento dello stato della richiesta:", error);
+            setCreatorRequest(null);
+        }
+    };
+    
+    // Carica tutte le richieste pendenti (solo admin)
+    const loadPendingRequests = async () => {
+        try {
+            if (!state.selectedAddress || !state.isOwner) return [];
+            
+            setPendingRequestsLoading(true);
+            const requests = await creatorRequestManagerService.getPendingRequests();
+            setPendingRequests(requests);
+            
+            return requests;
+        } catch (error) {
+            console.error("Errore nel caricamento delle richieste pendenti:", error);
+            setPendingRequests([]);
+        } finally {
+            setPendingRequestsLoading(false);
+        }
+    };
+
+    // Carica le milestone di una campagna
+    const loadCampaignMilestones = async (campaignAddress) => {
+        if (!campaignAddress) return;
+        
+        setMilestonesLoading(prev => ({ ...prev, [campaignAddress]: true }));
+        
+        try {
+            // Inizializza la campagna se necessario
+            if (!campaignService.campaigns[campaignAddress]) {
+                if (!state.selectedAddress) {
+                    await campaignService.initializeCampaignReadOnly(campaignAddress, CampaignArtifact);
+                } else {
+                    await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
+                }
+            }
+            
+            const milestones = await campaignService.getMilestones(campaignAddress);
+            setCampaignMilestones(prev => ({ ...prev, [campaignAddress]: milestones }));
+        } catch (error) {
+            console.error(`Errore nel caricamento delle milestone per ${campaignAddress}:`, error);
+            setCampaignMilestones(prev => ({ ...prev, [campaignAddress]: [] }));
+        } finally {
+            setMilestonesLoading(prev => ({ ...prev, [campaignAddress]: false }));
+        }
+    };
+    
+    // Approva una richiesta di creatore (solo admin)
+    const approveCreatorRequest = async (applicantAddress) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Approvazione richiesta..." }));
+            
+            const result = await creatorRequestManagerService.approveCreatorRequest(applicantAddress);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: result.receipt.transactionHash }));
+            
+            // Ricarica le richieste pendenti
+            await loadPendingRequests();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return result;
+        } catch (error) {
+            console.error("Errore nell'approvazione della richiesta:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
+
+    // Approva una milestone (solo admin)
+    const approveMilestone = async (campaignAddress, milestoneIndex) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Approvazione milestone..." }));
+            
+            const result = await campaignService.approveMilestone(campaignAddress, milestoneIndex);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: result.transactionHash }));
+            
+            // Ricarica le milestone
+            await loadCampaignMilestones(campaignAddress);
+            
+            await loadTransactions(state.selectedAddress);
+        
+            // Se l'utente è admin, ricarica anche le transazioni globali
+            if (state.isOwner) {
+                await loadGlobalTransactions();
+            }
+            
+            // Aggiorna il trigger per forzare un refresh
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                globalTxRefreshTrigger: prevState.globalTxRefreshTrigger + 1
+            }));
+            
+            return result;
+        } catch (error) {
+            console.error("Errore nell'approvazione della milestone:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
+    
+    // Rifiuta una richiesta di creatore (solo admin)
+    const rejectCreatorRequest = async (applicantAddress) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Rifiuto richiesta..." }));
+            
+            const result = await creatorRequestManagerService.rejectCreatorRequest(applicantAddress);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: result.receipt.transactionHash }));
+            
+            // Ricarica le richieste pendenti
+            await loadPendingRequests();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return result;
+        } catch (error) {
+            console.error("Errore nel rifiuto della richiesta:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
+    
+    
     // Effetto per caricare le transazioni globali quando cambia il trigger
     useEffect(() => {
         if (state.selectedAddress && state.isOwner) {
@@ -523,6 +843,12 @@ export function Web3Provider({ children }) {
                     ethBalance: null,
                     tokenData: null
                 }));
+                
+                setCampaigns([]);
+                setUserCampaigns([]);
+                setCampaignsLoading(true);
+                setUserCampaignsLoading(true);
+                setIsAuthorizedCreator(false);
             } else if (accounts[0] !== state.selectedAddress) {
                 // Cambio account
                 initialize(accounts[0]);
@@ -594,7 +920,26 @@ export function Web3Provider({ children }) {
         getRpcErrorMessage,
         globalTransactions,
         globalTransactionsLoading,
-        loadGlobalTransactions
+        loadGlobalTransactions,
+        campaigns,
+        campaignsLoading,
+        userCampaigns,
+        userCampaignsLoading,
+        isAuthorizedCreator,
+        loadCampaigns,
+        makeDonation,
+        creatorRequest,
+        pendingRequests,
+        pendingRequestsLoading,
+        submitCreatorRequest,
+        loadCreatorRequestStatus,
+        loadPendingRequests,
+        approveCreatorRequest,
+        rejectCreatorRequest,
+        campaignMilestones,
+        milestonesLoading,
+        loadCampaignMilestones,
+        approveMilestone
     };
     
     return (

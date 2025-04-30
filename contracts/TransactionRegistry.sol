@@ -10,11 +10,11 @@ contract TransactionRegistry {
     
     // Tipi di transazione supportati
     enum TransactionType {
-        EXCHANGE_BUY,    // Acquisto di token con ETH
-        EXCHANGE_SELL,   // Vendita di token per ETH
-        ETH_DEPOSIT,     // Deposito di ETH nel sistema
-        TOKEN_WITHDRAW,  // Prelievo di token dal sistema
-        ETH_WITHDRAW     // Prelievo di ETH dal sistema
+        EXCHANGE_BUY,     // Acquisto di token con ETH
+        EXCHANGE_SELL,    // Vendita di token per ETH
+        ETH_DEPOSIT,      // Deposito di ETH nel sistema
+        DONATION,         // Donazione
+        MILESTONE_RELEASE // Pagamento di una milestone
     }
     
     // Struttura per le transazioni
@@ -34,6 +34,9 @@ contract TransactionRegistry {
     
     // Mapping per autorizzare contratti esterni
     mapping(address => bool) public authorizedContracts;
+
+    //mappa degli indirizzi autorizzati a registrare transazioni
+    mapping(address => bool) public authorizedManagers;
     
     // EVENTI
     event TransactionRecorded(
@@ -61,8 +64,16 @@ contract TransactionRegistry {
      * @dev Autorizza o revoca un contratto a registrare transazioni
      */
     function setContractAuthorization(address contractAddress, bool isAuthorized) public {
-        require(msg.sender == owner, "Solo l'owner puo autorizzare contratti");
+        require(
+            msg.sender == owner || authorizedManagers[msg.sender],
+            "Solo l'owner o i manager autorizzati possono autorizzare contratti"
+        );
         authorizedContracts[contractAddress] = isAuthorized;
+    }
+
+    function setManagerAuthorization(address manager, bool isAuthorized) public {
+        require(msg.sender == owner, "Solo l'owner puo' autorizzare manager");
+        authorizedManagers[manager] = isAuthorized;
     }
     
     /**

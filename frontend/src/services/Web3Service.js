@@ -33,6 +33,29 @@ const web3Service = {
             throw error;
         }
     },
+
+    /**
+     * Inizializza la connessione in sola lettura senza richiedere l'account
+     * @returns {Object} - Oggetto con provider
+     */
+    initializeReadOnly: async function() {
+        try {
+            // Se MetaMask è disponibile, usalo in modalità sola lettura
+            if (window.ethereum) {
+                this.provider = new ethers.providers.Web3Provider(window.ethereum);
+            } else {
+                // Altrimenti usa un provider pubblico (network predefinito o configurabile)
+                this.provider = new ethers.providers.JsonRpcProvider("https://rpc-sepolia.rockx.com");
+            }
+            
+            return { 
+                provider: this.provider 
+            };
+        } catch (error) {
+            console.error("Errore durante l'inizializzazione di Web3 in modalità lettura:", error);
+            throw error;
+        }
+    },
     
     /**
     * Ottiene l'indirizzo dell'account connesso
@@ -55,6 +78,8 @@ const web3Service = {
         const balance = await this.provider.getBalance(account);
         return ethers.utils.formatEther(balance);
     }
+
+    
 };
 
 export default web3Service;

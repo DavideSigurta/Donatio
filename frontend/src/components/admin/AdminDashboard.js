@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useWeb3 } from '../../contexts/Web3Context';
-import { GlobalTransactionHistory } from '../transaction/GlobalTransactionHistory';
-import { formatEtherValue, formatTokenValue, parseSafeValue, shortenAddress } from '../../utils/formatters';
+import { formatEtherValue, formatTokenValue, parseSafeValue, shortenAddress, isAmountExceedingBalance } from '../../utils/formatters';
 
 /**
  * Dashboard di amministrazione per l'owner del contratto
@@ -23,6 +22,7 @@ export function AdminDashboard() {
     // Stato locale per gestire l'input dell'importo da depositare
     const [depositAmount, setDepositAmount] = useState("");
     const [depositAmountWei, setDepositAmountWei] = useState("");
+    const [insufficientBalance, setInsufficientBalance] = useState(false);
     
     // Funzione di gestione dell'input per il deposito
     const handleAmountChange = (e) => {
@@ -33,30 +33,34 @@ export function AdminDashboard() {
             if (value && !isNaN(value)) {
                 const amountWei = parseSafeValue(value, true); // Usiamo parseSafeValue per conversione sicura
                 setDepositAmountWei(amountWei);
+                
+                // Verifica se l'importo supera il saldo ETH disponibile
+                const hasInsufficientBalance = isAmountExceedingBalance(value, ownerEthBalance);
+                setInsufficientBalance(hasInsufficientBalance);
             } else {
                 setDepositAmountWei("");
+                setInsufficientBalance(false);
             }
         } catch (error) {
             console.error("Errore nella conversione:", error);
             setDepositAmountWei("");
+            setInsufficientBalance(false);
         }
     };
     
     const handleDeposit = (e) => {
         e.preventDefault();
-        if (depositAmountWei) {
+        if (depositAmountWei && !insufficientBalance) {
             depositETH(depositAmountWei);
             setDepositAmount("");
             setDepositAmountWei("");
+            setInsufficientBalance(false);
         }
     };
     
     return (
         <div>
             <div className="card shadow mb-4">
-                <div className="card-header bg-primary text-white">
-                    <h4 className="mb-0">Admin Dashboard</h4>
-                </div>
                 <div className="card-body">
                     {/* Sezione informazioni wallet e contratto con layout verticale */}
                     <div className="mb-4">
@@ -116,6 +120,11 @@ export function AdminDashboard() {
                                     />
                                     <span className="input-group-text">ETH</span>
                                 </div>
+                                {insufficientBalance && (
+                                    <small className="text-danger mt-1">
+                                        Saldo ETH insufficienteper effettuare il deposito.
+                                    </small>
+                                )}
                                 <div className="form-text">
                                     Il deposito sarà utilizzato per il buffer di scambio DNT → ETH.
                                 </div>
@@ -124,21 +133,13 @@ export function AdminDashboard() {
                             <button 
                                 className="btn btn-primary w-100" 
                                 type="submit"
-                                disabled={!depositAmountWei || depositAmountWei.isZero()}
+                                disabled={!depositAmountWei || depositAmountWei.isZero() || insufficientBalance}
                             >
                                 Deposita ETH nel Contratto
                             </button>
                         </form>
                     </div>
                 </div>
-            </div>
-            
-            <div className="mt-4">
-                <h5 className="mb-3">Cronologia globale delle transazioni</h5>
-                <p className="text-muted mb-4">
-                    Visualizza tutte le transazioni effettuate dagli utenti sulla piattaforma Donatio.
-                </p>
-                <GlobalTransactionHistory />
             </div>
         </div>
     );

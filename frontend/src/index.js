@@ -1,20 +1,20 @@
+import "bootstrap/dist/css/bootstrap.css";
+import "./styles/custom.css";
+
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { Dapp } from "./components/Dapp";
+import { BrowserRouter } from "react-router-dom";
+import { Dapp } from "./components/Dapp"; // Mantieni il riferimento a Dapp
 import { Web3Provider } from "./contexts/Web3Context";
-
-// We import bootstrap here, but you can remove if you want
-import "bootstrap/dist/css/bootstrap.css";
-
-// This is the entry point of your application, but it just renders the Dapp
-// react component. All of the logic is contained in it.
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 
 root.render(
   <React.StrictMode>
-    <Web3Provider>
-      <Dapp />
-    </Web3Provider>
+    <BrowserRouter>
+      <Web3Provider>
+        <Dapp />
+      </Web3Provider>
+    </BrowserRouter>
   </React.StrictMode>
 );

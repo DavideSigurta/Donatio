@@ -1,0 +1,117 @@
+:root {
+    /* Sostituisci #3a86ff con l'esatto colore blu del tuo logo */
+    --bs-primary: #163056;
+    --bs-primary-rgb: 14, 35, 67;
+    --bs-link-color: #163056;
+    --bs-link-hover-color: #1a4995;
+  }
+  
+  /* Sovrascrivi i componenti Bootstrap che usano il colore primario */
+  .btn-primary {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+  }
+  
+  .btn-primary:hover,
+  .btn-primary:focus,
+  .btn-primary:active {
+    background-color: var(--bs-link-hover-color);
+    border-color: var(--bs-link-hover-color);
+  }
+  
+  .btn-outline-primary {
+    color: var(--bs-primary);
+    border-color: var(--bs-primary);
+  }
+  
+  .btn-outline-primary:hover {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+  }
+
+.btn:disabled,
+.btn.disabled {
+  /* Cambia questi colori con quelli che preferisci */
+  background-color: var(--bs-primary); /* Versione più chiara del tuo colore primario */
+  border-color: var(--bs-primary);
+  color: #ffffff; /* Colore del testo */
+  opacity: 0.9; /* Opacità (1 = completamente visibile) */
+}
+
+/* Stile specifico per i pulsanti primari disabilitati */
+.btn-primary:disabled,
+.btn-primary.disabled {
+  background-color: var(--bs-primary); /* Versione più chiara del tuo blu */
+  border-color: var(--bs-primary);
+}
+
+/* Stile per i pulsanti outline quando disabilitati */
+.btn-outline-primary:disabled,
+.btn-outline-primary.disabled {
+  color: var(--bs-primary);
+  border-color: var(--bs-primary);
+  background-color: transparent;
+}
+  
+  .nav-pills .nav-link.active, 
+  .nav-pills .show > .nav-link {
+    background-color: var(--bs-primary);
+  }
+  
+  .progress-bar {
+    background-color: var(--bs-primary);
+  }
+  
+  a {
+    color: var(--bs-link-color);
+  }
+  
+  a:hover {
+    color: var(--bs-link-hover-color);
+  }
+  
+  .text-primary {
+    color: var(--bs-primary) !important;
+  }
+  
+  .border-primary {
+    border-color: var(--bs-primary) !important;
+  }
+  
+  .bg-primary {
+    background-color: var(--bs-primary) !important;
+  }
+
+  /* Stile personalizzato per il footer */
+footer.bg-light {
+    background-color: var(--bs-primary) !important;
+    color: white;
+  }
+  
+  /* Stile per i titoli nel footer */
+  footer h5,
+  footer h6 {
+    color: white !important;
+  }
+  
+  /* Stile per i testi nel footer, inclusi quelli con classe text-muted */
+  footer p,
+  footer .text-muted {
+    color: rgba(255, 255, 255, 0.9) !important;
+  }
+  
+  /* Stile per i link nel footer */
+  footer a.text-decoration-none {
+    color: white !important;
+  }
+  
+  /* Effetto hover per i link nel footer */
+  footer a.text-decoration-none:hover {
+    color: rgba(255, 255, 255, 0.8) !important;
+    text-decoration: underline !important;
+  }
+  
+  /* Copyright nel footer */
+  footer .mb-0.text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }

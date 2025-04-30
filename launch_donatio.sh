@@ -1,9 +1,8 @@
 #!/bin/bash
-# filepath: /Users/davide/Desktop/Universita/Programmi/eth/Donatio/launch_donatio.sh
 
 PROJECT_DIR="$(pwd)"
 
-# Controlla se la porta 8545 è già in uso e termina il processo
+# Termina processi esistenti
 echo "Controllo se ci sono istanze precedenti di Hardhat in esecuzione..."
 PORT_PID=$(lsof -i :8545 -t 2>/dev/null)
 if [ -n "$PORT_PID" ]; then
@@ -11,6 +10,25 @@ if [ -n "$PORT_PID" ]; then
     kill -9 $PORT_PID
     sleep 1
 fi
+
+# Reset ANCORA PIÙ COMPLETO dell'ambiente
+echo "Pulizia completa dell'ambiente di sviluppo..."
+rm -rf "${PROJECT_DIR}/cache"
+rm -rf "${PROJECT_DIR}/artifacts"
+rm -rf "${PROJECT_DIR}/.hardhat" 2>/dev/null
+rm -rf "${PROJECT_DIR}/typechain" 2>/dev/null
+rm -rf "${PROJECT_DIR}/typechain-types" 2>/dev/null
+rm -rf "${PROJECT_DIR}/deployments/localhost" 2>/dev/null
+
+# Pulizia più approfondita del frontend
+echo "Pulizia cache frontend..."
+rm -f "${PROJECT_DIR}/frontend/src/contracts/contract-address.json"
+rm -rf "${PROJECT_DIR}/frontend/node_modules/.cache"
+rm -rf "${PROJECT_DIR}/frontend/.parcel-cache" 2>/dev/null
+
+# Forza ricompilazione dei contratti
+echo "Ricompilazione contratti..."
+cd "${PROJECT_DIR}" && npx hardhat compile --force
 
 osascript <<EOD
 tell application "iTerm"
@@ -36,7 +54,7 @@ tell application "iTerm"
     tell current window
         create tab with default profile
         tell current session of current tab
-            write text "cd '${PROJECT_DIR}/frontend' && clear && echo 'Attendere deploy dei contratti...' && sleep 2 && echo 'Avvio frontend...' && npm start"
+            write text "cd '${PROJECT_DIR}/frontend' && clear && echo 'Attendere deploy dei contratti...' && sleep 4 && echo 'Avvio frontend...' && npm run start"
         end tell
     end tell
     
@@ -44,4 +62,4 @@ tell application "iTerm"
 end tell
 EOD
 
-echo "Donatio avviato in iTerm2 a schermo intero"
+echo "Donatio avviato con reset completo in iTerm2 a schermo intero"

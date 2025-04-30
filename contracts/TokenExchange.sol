@@ -160,51 +160,6 @@ contract TokenExchange {
     }
     
     /**
-     * @dev Permette all'owner di ritirare ETH dal contratto
-     */
-    function withdrawETH() public {
-        require(msg.sender == owner, "Solo l'owner puo ritirare ETH");
-        
-        uint256 amount = address(this).balance;
-        require(amount > 0, "Nessun ETH da ritirare");
-        
-        // Registra la transazione
-        transactionRegistry.recordTransaction(
-            msg.sender,
-            TransactionRegistry.TransactionType.ETH_WITHDRAW,
-            0,
-            amount
-        );
-        
-        emit TransactionExecuted(msg.sender, false, 0, amount, block.timestamp);
-        
-        (bool sent, ) = payable(owner).call{value: amount}("");
-        require(sent, "Trasferimento ETH fallito");
-    }
-    
-    /**
-     * @dev Permette all'owner di ritirare token dal contratto
-     */
-    function withdrawTokens() public {
-        require(msg.sender == owner, "Solo l'owner puo ritirare token");
-        
-        uint256 tokenBalance = token.balanceOf(address(this));
-        require(tokenBalance > 0, "Nessun token da ritirare");
-        
-        // Registra la transazione
-        transactionRegistry.recordTransaction(
-            msg.sender,
-            TransactionRegistry.TransactionType.TOKEN_WITHDRAW,
-            tokenBalance,
-            0
-        );
-        
-        emit TransactionExecuted(msg.sender, false, tokenBalance, 0, block.timestamp);
-        
-        require(token.transfer(owner, tokenBalance), "Trasferimento token fallito");
-    }
-    
-    /**
      * @dev Funzioni di compatibilità per il frontend esistente
      */
     
