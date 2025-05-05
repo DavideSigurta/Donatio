@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useWeb3 } from '../../contexts/Web3Context';
 
 /**
@@ -10,8 +10,12 @@ import { useWeb3 } from '../../contexts/Web3Context';
  * @returns {JSX.Element} Componente React
  */
 const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
-  const { isOwner, approveMilestone } = useWeb3();
-  
+  const { isOwner, approveMilestone, rejectMilestone } = useWeb3();
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [selectedMilestoneIndex, setSelectedMilestoneIndex] = useState(null);
+  const rejectedIndex = milestones ? milestones.findIndex(m => m.rejected) : -1;
+
   // Gestisce l'approvazione di una milestone
   const handleApprove = async (milestoneIndex) => {
     if (window.confirm('Sei sicuro di voler approvare questa milestone?')) {
@@ -23,10 +27,41 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
       }
     }
   };
+
+  const isRefundedDueToPreviousRejection = (index) => {
+    return rejectedIndex !== -1 && index > rejectedIndex;
+  };
+
+  // Gestisce l'apertura del modal per il rifiuto
+  const handleOpenRejectModal = (milestoneIndex) => {
+    setSelectedMilestoneIndex(milestoneIndex);
+    setRejectReason('');
+    setShowRejectModal(true);
+  };
+  
+  // Gestisce il rifiuto di una milestone
+  const handleReject = async () => {
+    if (!rejectReason.trim()) {
+      alert("È necessario fornire una motivazione per il rifiuto.");
+      return;
+    }
+    
+    try {
+      await rejectMilestone(campaignAddress, selectedMilestoneIndex, rejectReason);
+      setShowRejectModal(false);
+    } catch (error) {
+      console.error("Errore nel rifiuto della milestone:", error);
+      alert("Si è verificato un errore durante il rifiuto della milestone.");
+    }
+  };
   
   // Determina lo stato di una milestone
   const getMilestoneStatus = (milestone, index, currentMilestoneIndex) => {
-    if (milestone.fundsReleased) {
+    if (milestone.rejected) {
+      return { text: 'Rifiutata - Fondi Rimborsati', variant: 'danger' };
+    } else if (isRefundedDueToPreviousRejection(index)) {
+      return { text: 'Fondi Rimborsati', variant: 'danger' }; // Stessa variante ma testo diverso
+    } else if (milestone.fundsReleased) {
       return { text: 'Fondi rilasciati', variant: 'success' };
     } else if (milestone.approved) {
       return { text: 'Approvata', variant: 'success' };
@@ -81,6 +116,7 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
         
         // Determina il colore della barra di progresso
         const progressBarVariant = 
+          milestone.rejected || isRefundedDueToPreviousRejection(index) ? 'bg-danger' :
           progressPercentage >= 100 ? 'bg-success' : 
           progressPercentage > 50 ? 'bg-info' : 
           'bg-warning';
@@ -113,25 +149,109 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
                   {progressPercentage.toFixed(0)}%
                 </div>
               </div>
-              
-              {/* Pulsante di approvazione per l'admin */}
+
+              {/* Mostra l'avviso di rimborso per le milestone influenzate dal rifiuto */}
+              {isRefundedDueToPreviousRejection(index) && (
+                <div className="alert alert-warning mt-3">
+                  <div className="d-flex align-items-center">
+                    <i className="bi bi-arrow-return-left me-2"></i>
+                    <small>I fondi ({milestone.raisedAmount} DNT) sono stati automaticamente rimborsati a causa del rifiuto di una milestone precedente.</small>
+                  </div>
+                </div>
+              )}
+
+              {/* Mostra la motivazione del rifiuto se presente */}
+              {milestone.rejected && milestone.rejectionReason && (
+                <div className="alert alert-danger mt-3">
+                  <h6 className="mb-1">Motivazione del rifiuto:</h6>
+                  <p className="mb-0">{milestone.rejectionReason}</p>
+                  <div className="d-flex align-items-center mt-2">
+                    <i className="bi bi-arrow-return-left me-2"></i>
+                    <small>I fondi ({milestone.raisedAmount} DNT) sono stati rimborsati ai donatori.</small>
+                  </div>
+                </div>
+              )}
+
               {isOwner && 
-               !milestone.approved && 
-               parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) && (
+              !milestone.approved && 
+              parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) && 
+              index > 0 && !milestones[index - 1]?.approved && (
                 <div className="text-end">
                   <button 
-                    className="btn btn-success btn-sm"
-                    onClick={() => handleApprove(milestone.index)}
+                    className="btn btn-secondary btn-sm"
+                    disabled
                     type="button"
                   >
-                    <i className="bi bi-check-circle me-1"></i> Approva milestone
+                    <i className="bi bi-lock me-1"></i> Approva milestone
                   </button>
+                  <small className="d-block text-muted mt-1">
+                    Approva prima la milestone precedente
+                  </small>
+                </div>
+              )}
+
+              {isOwner && 
+              !milestone.approved && 
+              !milestone.rejected &&
+              parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) && 
+              (index === 0 || milestones[index - 1]?.approved) && (
+                <div className="row g-2">
+                  <div className="col-auto">
+                    <button 
+                      className="btn btn-success btn-sm"
+                      onClick={() => handleApprove(milestone.index)}
+                      type="button"
+                    >
+                      <i className="bi bi-check-circle me-1"></i> Approva
+                    </button>
+                  </div>
+                  <div className="col-auto">
+                    <button 
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleOpenRejectModal(milestone.index)}
+                      type="button"
+                    >
+                      <i className="bi bi-x-circle me-1"></i> Rifiuta
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           </div>
         );
       })}
+
+      {showRejectModal && (
+        <div className="modal d-block" tabIndex="-1" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Rifiuta Milestone</h5>
+                <button type="button" className="btn-close" onClick={() => setShowRejectModal(false)}></button>
+              </div>
+              <div className="modal-body">
+                <p>Stai rifiutando questa milestone. La campagna sarà disattivata e i fondi saranno rimborsati ai donatori.</p>
+                <div className="mb-3">
+                  <label htmlFor="rejectReason" className="form-label">Motivazione del rifiuto:</label>
+                  <textarea
+                    id="rejectReason"
+                    className="form-control"
+                    rows="4"
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Fornisci una motivazione dettagliata del rifiuto..."
+                    required
+                  ></textarea>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>Annulla</button>
+                <button type="button" className="btn btn-danger" onClick={handleReject}>Conferma Rifiuto</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

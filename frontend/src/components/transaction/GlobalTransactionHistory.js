@@ -96,6 +96,8 @@ export function GlobalTransactionHistory({customTransactions, customIsLoading}) 
                                                 <span className="badge bg-secondary">Donazione</span>
                                             ) : tx.type === 'milestone-release' ? (
                                                 <span className="badge bg-warning">Rilascio Milestone</span>
+                                            ) : tx.type === 'milestone-refund' ? (
+                                                <span className="badge bg-danger">Rimborso Milestone</span>
                                             ) : (
                                                 <span className="badge bg-secondary">{tx.type}</span>
                                             )}
@@ -112,6 +114,8 @@ export function GlobalTransactionHistory({customTransactions, customIsLoading}) 
                                                 <span className="text-danger">-{formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
                                             ) : tx.type === 'milestone-release' ? (
                                                 <span>Approvati {formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
+                                            ) : tx.type === 'milestone-refund' ? (
+                                                <span>Rimborsati {formatTokenValue(tx.tokenAmount)} {tokenSymbol}</span>
                                             ) : (
                                                 <span>-</span>
                                             )}
@@ -146,6 +150,8 @@ export function GlobalTransactionHistory({customTransactions, customIsLoading}) 
                                             `L'utente ha donato ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} a una campagna`
                                         ) : tx.type === 'milestone-release' ? (
                                             `Utente ha ricevuto ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} dal rilascio di una milestone`
+                                        ) : tx.type === 'milestone-refund' ? (
+                                            `Utente ha ricevuto ${formatTokenValue(tx.tokenAmount)} ${tokenSymbol} di rimborso per una milestone rifiutata`
                                         ) : (
                                             `Transazione di tipo ${tx.type}`
                                         )}

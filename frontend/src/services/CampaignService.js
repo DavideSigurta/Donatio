@@ -265,7 +265,11 @@ const campaignService = {
             
             // Poi effettua la donazione
             const signedCampaign = this.getSignedCampaign(campaignAddress);
-            const tx = await signedCampaign.donate(amountWei, message, { gasLimit: 300000 });
+            const isActive = await signedCampaign.active();
+            if (!isActive) {
+                throw new Error("Non puoi donare a una campagna inattiva");
+            }
+            const tx = await signedCampaign.donate(amountWei, message, { gasLimit: 2000000 });
             console.log("Donazione inviata, transaction hash:", tx.hash);
             
             const receipt = await tx.wait();
@@ -361,6 +365,19 @@ const campaignService = {
                 const milestone = await this.milestoneManager.getMilestone(campaignAddress, i);
                 console.log(`[DEBUG] Milestone ${i} recuperata:`, milestone);
                 
+                // Verifica se la milestone è stata rifiutata
+                const isRejected = await this.milestoneManager.isMilestoneRejected(campaignAddress, i);
+                
+                // Se rifiutata, recupera la motivazione
+                let rejectionReason = '';
+                if (isRejected) {
+                    try {
+                        rejectionReason = await this.milestoneManager.getRejectionReason(campaignAddress, i);
+                    } catch (error) {
+                        console.error(`[DEBUG] Errore nel recupero della motivazione del rifiuto per milestone ${i}:`, error);
+                    }
+                }
+                
                 milestones.push({
                     index: i,
                     title: milestone.title,
@@ -368,7 +385,9 @@ const campaignService = {
                     targetAmount: ethers.utils.formatEther(milestone.targetAmount),
                     raisedAmount: ethers.utils.formatEther(milestone.raisedAmount),
                     approved: milestone.approved,
-                    fundsReleased: milestone.fundsReleased
+                    fundsReleased: milestone.fundsReleased,
+                    rejected: isRejected,              // Aggiungi questa proprietà
+                    rejectionReason: rejectionReason   // Aggiungi questa proprietà
                 });
             }
             
@@ -376,7 +395,6 @@ const campaignService = {
             return milestones;
         } catch (error) {
             console.error("[DEBUG] Errore dettagliato nel recupero delle milestone:", error);
-            // Ritorna un array vuoto invece di propagare l'errore per evitare il blocco dell'app
             return [];
         }
     },
@@ -441,6 +459,29 @@ const campaignService = {
             return ethers.utils.formatEther(amount);
         } catch (error) {
             console.error("Errore nel recupero dei fondi disponibili:", error);
+            throw error;
+        }
+    },
+
+    /**
+     * Rifiuta una milestone (solo admin)
+     * @param {string} campaignAddress - Indirizzo della campagna
+     * @param {number} milestoneIndex - Indice della milestone da rifiutare
+     * @param {string} reason - Motivazione del rifiuto
+     * @returns {Promise<Object>} - Risultato della transazione
+     */
+    rejectMilestone: async function(campaignAddress, milestoneIndex, reason) {
+        try {
+            const campaignFactory = campaignFactoryService.getSignedContract();
+            const tx = await campaignFactory.rejectMilestone(
+                campaignAddress, 
+                milestoneIndex, 
+                reason,
+                { gasLimit: 2000000 }
+            );
+            return await tx.wait();
+        } catch (error) {
+            console.error("Errore nel rifiuto della milestone:", error);
             throw error;
         }
     }

@@ -240,6 +240,7 @@ export function Web3Provider({ children }) {
                 else if (tx.transactionType === 2) type = 'deposit'; // ETH_DEPOSIT
                 else if (tx.transactionType === 3) type = 'donation'; // DONATION
                 else if (tx.transactionType === 4) type = 'milestone-release'; // MILESTONE_RELEASE
+                else if (tx.transactionType === 5) type = 'milestone-refund'; // MILESTONE_REFUND
                 
                 return {
                     type: type,
@@ -308,6 +309,8 @@ export function Web3Provider({ children }) {
                     type = 'donation'; // DONATION
                 } else if (tx.transactionType === 4) {
                     type = 'milestone-release'; // MILESTONE_RELEASE
+                } else if (tx.transactionType === 5) {
+                    type = 'milestone-refund'; // MILESTONE_REFUND
                 }
                 
                 return {
@@ -617,11 +620,11 @@ export function Web3Provider({ children }) {
             console.log("Chiamata alla funzione donate con parametri:", {
                 amountWei: amountWei.toString(),
                 message: message,
-                gasLimit: 500000
+                gasLimit: 2000000
             });
             
             const tx = await signedCampaign.donate(amountWei, message, { 
-                gasLimit: 500000 
+                gasLimit: 2000000 
             });
             console.log("Donazione inviata, transaction hash:", tx.hash);
             
@@ -796,6 +799,50 @@ export function Web3Provider({ children }) {
             throw error;
         }
     };
+
+    const rejectMilestone = async (campaignAddress, milestoneIndex, reason) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Rifiuto milestone..." }));
+            
+            const result = await campaignService.rejectMilestone(campaignAddress, milestoneIndex, reason);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: result.transactionHash }));
+            
+            // Ricarica le milestone
+            await loadCampaignMilestones(campaignAddress);
+            
+            // Ricarica le transazioni dell'utente
+            await loadTransactions(state.selectedAddress);
+        
+            // Se l'utente è admin, ricarica anche le transazioni globali
+            if (state.isOwner) {
+                await loadGlobalTransactions();
+            }
+            
+            // Aggiorna il trigger per forzare un refresh
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                globalTxRefreshTrigger: prevState.globalTxRefreshTrigger + 1
+            }));
+            
+            // Attendi che la blockchain processi la transazione
+            setTimeout(() => {
+                // Forza il ricaricamento della pagina per aggiornare tutti i dati
+                window.location.reload();
+            }, 2000); // Attendi 2 secondi per dare tempo alla blockchain di aggiornare lo stato
+            
+            return result;
+        } catch (error) {
+            console.error("Errore nel rifiuto della milestone:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
     
     // Rifiuta una richiesta di creatore (solo admin)
     const rejectCreatorRequest = async (applicantAddress) => {
@@ -939,7 +986,8 @@ export function Web3Provider({ children }) {
         campaignMilestones,
         milestonesLoading,
         loadCampaignMilestones,
-        approveMilestone
+        approveMilestone,
+        rejectMilestone
     };
     
     return (

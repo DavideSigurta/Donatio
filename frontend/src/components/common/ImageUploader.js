@@ -128,6 +128,8 @@ export function ImageUploader({ onImagesChange, maxImages = 5 }) {
               Formati supportati: JPG, PNG, GIF, WEBP (max 5MB per file)
               <br />
               La prima immagine sarà utilizzata come copertina principale.
+              <br />
+              Se non viene caricata alcuna immagine, verrà utilizzata un'immagine predefinita.
             </small>
           </>
         )}

@@ -147,6 +147,13 @@ contract CampaignFactory {
     }
 
     /**
+     * @dev Rifiuta una milestone (solo admin)
+     */
+    function rejectMilestone(address campaignAddress, uint256 milestoneIndex, string memory reason) external onlyOwner {
+        milestoneManager.rejectMilestone(campaignAddress, milestoneIndex, reason);
+    }
+
+    /**
      * @dev Restituisce il numero totale di campagne
      */
     function getCampaignsCount() external view returns (uint256) {

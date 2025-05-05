@@ -19,6 +19,11 @@ contract Campaign {
         string message;     // Messaggio opzionale
         uint256 timestamp;  // Timestamp della donazione
     }
+
+    struct MilestoneDonation {
+        uint256 donationIndex;       // Indice della donazione nell'array donations
+        uint256 amountContributed;   // Importo contribuito a questa milestone
+    }
     
     // Dati della campagna
     string public title;                // Titolo della campagna
@@ -56,6 +61,12 @@ contract Campaign {
     
     // Flag per indicare che le milestone sono state impostate
     bool public milestonesConfigured;
+
+    // Mappa per tenere traccia delle donazioni per ogni milestone
+    mapping(uint256 => MilestoneDonation[]) public milestoneDonations;
+
+    // Traccia quanti fondi non sono stati ancora rimborsati per milestone
+    mapping(uint256 => uint256) public milestoneAvailableFunds;
 
     // Eventi
     event DonationReceived(address indexed donor, uint256 amount, string message, uint256 timestamp);
@@ -157,6 +168,36 @@ contract Campaign {
         
         // Trasferisci i token
         _transferTokens(_amount);
+
+        uint256 donationIndex = donations.length;
+
+        // Distribuisci la donazione alle milestone attraverso il MilestoneManager
+        uint256 remainingAmount = _amount;
+        uint256 i = milestoneManager.currentMilestoneIndex(address(this));
+
+        while (remainingAmount > 0 && i < milestoneManager.getMilestonesCount(address(this))) {
+        // Ottieni i dettagli della milestone
+            (,, uint256 targetAmount, uint256 raisedMilestoneAmount,,) = milestoneManager.getMilestone(address(this), i);
+            uint256 milestoneRemaining = targetAmount - raisedMilestoneAmount;
+            
+            if (milestoneRemaining > 0) {
+                uint256 amountToAdd = remainingAmount > milestoneRemaining ? 
+                                    milestoneRemaining : remainingAmount;
+                
+                // Registra questa parte della donazione per la milestone
+                milestoneDonations[i].push(MilestoneDonation({
+                    donationIndex: donationIndex,
+                    amountContributed: amountToAdd
+                }));
+                
+                // Aggiorna il totale disponibile per la milestone
+                milestoneAvailableFunds[i] += amountToAdd;
+                
+                remainingAmount -= amountToAdd;
+            }
+            
+            i++;
+        }
         
         // Distribuisci la donazione alle milestone attraverso il MilestoneManager
         bool success = milestoneManager.distributeFundsToMilestones(address(this), _amount);
@@ -167,6 +208,60 @@ contract Campaign {
         
         // Registra la donazione
         _recordDonation(_amount, _message);
+    }
+
+    /**
+     * @dev Rimborsa i donatori di una milestone rifiutata e tutte le milestone successive
+     * @param rejectedMilestoneIndex Indice della milestone rifiutata
+     */
+    function refundDonors(uint256 rejectedMilestoneIndex) external {
+        // Solo il MilestoneManager può chiamare questa funzione
+        require(
+            msg.sender == address(milestoneManager),
+            "Solo il MilestoneManager puo' chiamare questa funzione"
+        );
+        
+        // Verifica che la milestone sia stata effettivamente rifiutata
+        require(
+            milestoneManager.isMilestoneRejected(address(this), rejectedMilestoneIndex),
+            "La milestone non e' stata rifiutata"
+        );
+        
+        // Conta il numero totale di milestone
+        uint256 milestonesCount = milestoneManager.getMilestonesCount(address(this));
+        
+        // Per ogni milestone a partire da quella rifiutata fino all'ultima
+        for (uint256 i = rejectedMilestoneIndex; i < milestonesCount; i++) {
+            // Ottieni l'importo totale da rimborsare per questa milestone
+            uint256 totalToRefund = milestoneAvailableFunds[i];
+            
+            if (totalToRefund > 0) {
+                // Reset dei fondi disponibili
+                milestoneAvailableFunds[i] = 0;
+                
+                // Processa ogni donazione associata a questa milestone
+                for (uint256 j = 0; j < milestoneDonations[i].length; j++) {
+                    MilestoneDonation memory donation = milestoneDonations[i][j];
+                    
+                    address donor = donations[donation.donationIndex].donor;
+                    uint256 refundAmount = donation.amountContributed;
+                    
+                    if (refundAmount > 0) {
+                        // Trasferisci i token al donatore
+                        bool success = dntToken.transfer(donor, refundAmount);
+                        require(success, "Rimborso fallito");
+                        
+                        // Registra la transazione di rimborso
+                        transactionRegistry.recordTransaction(
+                            donor,
+                            TransactionRegistry.TransactionType.MILESTONE_REFUND,
+                            refundAmount,
+                            0
+                        );
+                    }
+                }
+            }
+        }
     }
     
     function _transferTokens(uint256 _amount) private {
@@ -254,11 +349,16 @@ contract Campaign {
     /**
      * @dev Cambia lo stato attivo/inattivo della campagna
      */
-    function setActive(bool _active) external onlyFactoryOrCreator {
+    function setActive(bool _active) external {
+        require(
+            msg.sender == factory || 
+            msg.sender == creator || 
+            msg.sender == address(milestoneManager),
+            "Solo il factory, creator o milestone manager possono modificare lo stato"
+        );
         active = _active;
         emit CampaignUpdated(title, description, active);
     }
-    
     /**
      * @dev Restituisce il numero totale di donazioni
      */

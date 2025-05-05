@@ -14,7 +14,8 @@ contract TransactionRegistry {
         EXCHANGE_SELL,    // Vendita di token per ETH
         ETH_DEPOSIT,      // Deposito di ETH nel sistema
         DONATION,         // Donazione
-        MILESTONE_RELEASE // Pagamento di una milestone
+        MILESTONE_RELEASE,// Pagamento di una milestone
+        MILESTONE_REFUND  // Rimborso di una milestone
     }
     
     // Struttura per le transazioni

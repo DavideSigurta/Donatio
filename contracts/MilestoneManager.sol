@@ -19,11 +19,9 @@ contract MilestoneManager {
     mapping(address => uint256[]) public milestoneApprovedAt;
     mapping(address => uint256) public currentMilestoneIndex;
     mapping(address => bool) public milestonesInitialized;
-    
-    // Totale del target milestone aggiunto per campagna
+    mapping(address => bool[]) public milestoneRejected;
+    mapping(address => mapping(uint256 => string)) public rejectionReasons;
     mapping(address => uint256) private totalMilestoneTarget;
-    
-    // Mappa delle autorizzazioni ad interagire con una campagna
     mapping(address => mapping(address => bool)) public authorizedCampaigns;
     
     // Admin del contratto (CampaignFactory)
@@ -32,6 +30,8 @@ contract MilestoneManager {
     // Eventi
     event MilestoneAdded(address indexed campaignAddress, uint256 index, string title, uint256 targetAmount);
     event MilestoneApproved(address indexed campaignAddress, uint256 indexed milestoneIndex, string title, uint256 amount, uint256 timestamp);
+    event MilestoneRejected(address indexed campaignAddress, uint256 indexed milestoneIndex, string title, uint256 amount, string reason, uint256 timestamp);
+
     
     constructor() {
         admin = msg.sender;
@@ -110,6 +110,13 @@ contract MilestoneManager {
         
         milestonesInitialized[campaignAddress] = true;
         currentMilestoneIndex[campaignAddress] = 0;
+
+        for (uint256 i = 0; i < milestoneTitles[campaignAddress].length; i++) {
+            milestoneRejected[campaignAddress].push(false);
+        }
+        
+        milestonesInitialized[campaignAddress] = true;
+        currentMilestoneIndex[campaignAddress] = 0;
     }
     
     /**
@@ -160,12 +167,16 @@ contract MilestoneManager {
             "La milestone non e' stata completamente finanziata"
         );
         
+        if (milestoneIndex > 0) {
+            require(
+                milestoneApproved[campaignAddress][milestoneIndex - 1],
+                "Devi prima approvare la milestone precedente"
+            );
+        }
+        
         // Imposta lo stato di approvazione
         milestoneApproved[campaignAddress][milestoneIndex] = true;
         milestoneApprovedAt[campaignAddress][milestoneIndex] = block.timestamp;
-        
-        // IMPORTANTE: NON segniamo la milestone come fundsReleased qui
-        // milestoneFundsReleased[campaignAddress][milestoneIndex] = true; <-- RIMUOVI QUESTA LINEA
         
         // Ottieni una reference al contratto Campaign
         Campaign campaign = Campaign(campaignAddress);
@@ -250,5 +261,67 @@ contract MilestoneManager {
         }
         
         return totalAvailable;
+    }
+    /**
+     * @dev Rifiuta una milestone e avvia il rimborso dei fondi (solo admin)
+     */
+    function rejectMilestone(address campaignAddress, uint256 milestoneIndex, string memory reason) external onlyAdmin {
+        require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
+        require(!milestoneApproved[campaignAddress][milestoneIndex], "Milestone gia' approvata");
+        require(!milestoneRejected[campaignAddress][milestoneIndex], "Milestone gia' rifiutata");
+        
+        // La milestone deve essere almeno parzialmente finanziata
+        require(
+            milestoneRaised[campaignAddress][milestoneIndex] > 0, 
+            "La milestone non ha fondi da rimborsare"
+        );
+        
+        // Imposta lo stato di rifiuto
+        milestoneRejected[campaignAddress][milestoneIndex] = true;
+        rejectionReasons[campaignAddress][milestoneIndex] = reason;
+        
+        // Ottieni una reference al contratto Campaign
+        Campaign campaign = Campaign(campaignAddress);
+        
+        // Disattiva la campagna
+        try campaign.setActive(false) {
+            // Campagna disattivata con successo
+        } catch {
+            // Se fallisce, continuiamo comunque con il rimborso
+        }
+        
+        // Effettua il rimborso ai donatori
+        try campaign.refundDonors(milestoneIndex) {
+            // Rimborso eseguito con successo
+        } catch {
+            // Se fallisce, il rifiuto rimane valido
+            // Gli utenti dovranno richiedere il rimborso manualmente
+        }
+        
+        emit MilestoneRejected(
+            campaignAddress,
+            milestoneIndex, 
+            milestoneTitles[campaignAddress][milestoneIndex],
+            milestoneRaised[campaignAddress][milestoneIndex],
+            reason,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Verifica se una milestone è stata rifiutata
+     */
+    function isMilestoneRejected(address campaignAddress, uint256 index) external view returns (bool) {
+        if (index >= milestoneTitles[campaignAddress].length) return false;
+        return milestoneRejected[campaignAddress][index];
+    }
+
+    /**
+     * @dev Ottiene la motivazione del rifiuto di una milestone
+     */
+    function getRejectionReason(address campaignAddress, uint256 index) external view returns (string memory) {
+        require(index < milestoneTitles[campaignAddress].length, "Indice non valido");
+        require(milestoneRejected[campaignAddress][index], "Milestone non rifiutata");
+        return rejectionReasons[campaignAddress][index];
     }
 }
