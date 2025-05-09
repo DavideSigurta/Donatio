@@ -4,7 +4,8 @@ import { useWeb3 } from "../../contexts/Web3Context";
 import { shortenAddress } from "../../utils/formatters";
 
 export function Header() {
-  const { selectedAddress, connectWallet, isOwner, isAuthorizedCreator } = useWeb3();
+  // Aggiunto isAdmin nella destructuring del useWeb3
+  const { selectedAddress, connectWallet, isOwner, isAuthorizedCreator, isAdmin } = useWeb3();
   const [showDropdown, setShowDropdown] = useState(false);
   
   const toggleDropdown = () => setShowDropdown(!showDropdown);
@@ -71,18 +72,30 @@ export function Header() {
                       {isOwner ? "Transazioni Globali" : "Le mie Transazioni"}
                     </Link>
                     
-                    {/* NUOVE VOCI MENU */}
                     <div className="dropdown-divider"></div>
-                    {isOwner ? (
-                      <Link to="/admin/creator-requests" className="dropdown-item" onClick={toggleDropdown}>
-                        Richieste Creatori
-                      </Link>
-                    ) : (
-                      !isAuthorizedCreator && (
-                        <Link to="/request-creator" className="dropdown-item" onClick={toggleDropdown}>
-                          Diventa Creatore
+                    
+                    {/* Sezione con funzionalità amministrative */}
+                    {isOwner && (
+                      <>
+                        <Link to="/admin/creator-requests" className="dropdown-item" onClick={toggleDropdown}>
+                          Richieste Creatori
                         </Link>
-                      )
+                        
+                        {/* Aggiungi il link alla dashboard di governance solo per gli admin */}
+                        {isAdmin && (
+                          <Link to="/admin/governance" className="dropdown-item" onClick={toggleDropdown}>
+                            <i className="bi bi-clipboard-data me-2"></i>
+                            Dashboard Governance
+                          </Link>
+                        )}
+                      </>
+                    )}
+                    
+                    {/* Link per richiedere di diventare creatore */}
+                    {!isOwner && !isAuthorizedCreator && (
+                      <Link to="/request-creator" className="dropdown-item" onClick={toggleDropdown}>
+                        Diventa Creatore
+                      </Link>
                     )}
                   </div>
                 )}

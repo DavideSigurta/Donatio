@@ -7,7 +7,8 @@ import transactionService from '../services/TransactionService';
 import campaignFactoryService from '../services/CampaignFactoryService';
 import campaignService from '../services/CampaignService';
 import creatorRequestManagerService from "../services/CreatorRequestManagerService";
-import CreatorRequestManagerArtifact from "../contracts/CreatorRequestManager.json";
+import governanceService from '../services/GovernanceService'; 
+
 
 // Importazione degli artifact
 import TokenArtifact from "../contracts/Token.json";
@@ -15,6 +16,8 @@ import TokenExchangeArtifact from "../contracts/TokenExchange.json";
 import TransactionRegistryArtifact from "../contracts/TransactionRegistry.json";
 import CampaignFactoryArtifact from '../contracts/CampaignFactory.json';
 import CampaignArtifact from '../contracts/Campaign.json';
+import CreatorRequestManagerArtifact from "../contracts/CreatorRequestManager.json";
+import GovernanceSystemArtifact from '../contracts/GovernanceSystem.json'; 
 import contractAddress from "../contracts/contract-address.json";
 
 // Costante per identificare la rete Hardhat locale
@@ -59,6 +62,11 @@ export function Web3Provider({ children }) {
     const [pendingRequestsLoading, setPendingRequestsLoading] = useState(true);
     const [campaignMilestones, setCampaignMilestones] = useState({});
     const [milestonesLoading, setMilestonesLoading] = useState({});
+    const [proposals, setProposals] = useState([]);
+    const [proposalsLoading, setProposalsLoading] = useState(true);
+    const [campaignProposals, setCampaignProposals] = useState({});
+    const [userVotingPower, setUserVotingPower] = useState({});
+    const [isAdmin, setIsAdmin] = useState(false);
     
     
     // Inizializza ethers, i contratti e recupera i dati iniziali
@@ -78,9 +86,8 @@ export function Web3Provider({ children }) {
             await transactionService.initialize(contractAddress.TransactionRegistry, TransactionRegistryArtifact);
             await campaignFactoryService.initialize(contractAddress.CampaignFactory, CampaignFactoryArtifact);
             await creatorRequestManagerService.initialize(contractAddress.CreatorRequestManager, CreatorRequestManagerArtifact);
-
+            await governanceService.initialize(contractAddress.GovernanceSystem, GovernanceSystemArtifact);
             await campaignService.initializeMilestoneManager();
-            
             
             // Carica i dati del token
             const token = tokenService.contract;
@@ -97,12 +104,12 @@ export function Web3Provider({ children }) {
             const exchange = exchangeService.contract;
             const owner = await exchange.owner();
             const isOwner = owner.toLowerCase() === userAddress.toLowerCase();
+            const isAdminUser = isOwner; 
+            setIsAdmin(isAdminUser);
             
             // Carica il rate di scambio
             const exchangeRate = await exchangeService.getExchangeRate();
-            
-            
-            
+               
             // Aggiorna lo stato con i dati recuperati
             setState(prevState => ({
                 ...prevState,
@@ -130,6 +137,9 @@ export function Web3Provider({ children }) {
 
             // Carica lo stato della richiesta dell'utente
             await loadCreatorRequestStatus();
+
+            // Carica le proposte di governance
+            await loadProposals();
             
             // Se l'utente è owner, carica anche i saldi del contratto e le transazioni globali
             if (isOwner) {
@@ -584,8 +594,58 @@ export function Web3Provider({ children }) {
                 const details = await campaignService.getCampaignDetails(address);
                 campaignList.push(details);
             }
-            
-            setCampaigns(campaignList);
+
+            if (!governanceService.contract) {
+                await governanceService.initializeReadOnly();
+            }
+
+            let proposalsByCampaign = campaignProposals;
+            if (Object.keys(proposalsByCampaign).length === 0) {
+                try {
+                    const count = await governanceService.getProposalsCount();
+                    if (count > 0) {
+                        const allProposals = await governanceService.getProposals(0, count);
+                        
+                        proposalsByCampaign = {};
+                        allProposals.forEach(proposal => {
+                            proposalsByCampaign[proposal.campaignAddress.toLowerCase()] = proposal;
+                        });
+                        
+                        setCampaignProposals(proposalsByCampaign);
+                    }
+                } catch (error) {
+                    console.error("Errore nel caricamento delle proposte:", error);
+                }
+            }
+
+
+            const enhancedCampaigns = campaignList.map(campaign => {
+                const campaignAddress = campaign.address.toLowerCase();
+                const proposal = proposalsByCampaign[campaignAddress];
+                
+                if (proposal) {
+                    return {
+                        ...campaign,
+                        proposalId: proposal.id,
+                        proposalStatus: proposal.status,
+                        proposalExecuted: proposal.executed,
+                        positiveVotes: proposal.positiveVotes,
+                        negativeVotes: proposal.negativeVotes,
+                        positivePercentage: proposal.positivePercentage,
+                        negativePercentage: proposal.negativePercentage,
+                        votingEndTime: proposal.endTime,
+                        timeRemaining: proposal.timeRemaining,
+                        isPending: Boolean(!campaign.active && proposal.status === 0 && !proposal.executed)
+                    };
+                }
+                
+                return {
+                    ...campaign,
+                    isPending: Boolean(!campaign.active)  // Assume che le campagne non attive senza proposta siano in approvazione
+                };
+            });
+        
+        setCampaigns(enhancedCampaigns);
         } catch (error) {
             console.error("Errore nel caricamento delle campagne", error);
             // Imposta l'array delle campagne come vuoto in caso di errore
@@ -593,7 +653,7 @@ export function Web3Provider({ children }) {
         } finally {
             setCampaignsLoading(false);
         }
-    }, [campaignFactoryService, campaignService, state.selectedAddress, web3Service]);
+    }, [campaignFactoryService, campaignService, state.selectedAddress, web3Service, campaignProposals]);
     
     const makeDonation = async (campaignAddress, amount, message = "") => {
         try {
@@ -733,6 +793,137 @@ export function Web3Provider({ children }) {
             setCampaignMilestones(prev => ({ ...prev, [campaignAddress]: [] }));
         } finally {
             setMilestonesLoading(prev => ({ ...prev, [campaignAddress]: false }));
+        }
+    };
+
+    const loadProposals = async () => {
+        try {
+            setProposalsLoading(true);
+            
+            // Inizializza in modalità sola lettura se necessario
+            if (!governanceService.contract) {
+                await governanceService.initializeReadOnly();
+            }
+            
+            // Ottieni il numero totale di proposte
+            const count = await governanceService.getProposalsCount();
+            
+            if (count === 0) {
+                setProposals([]);
+                setCampaignProposals({});
+                setProposalsLoading(false);
+                return;
+            }
+            
+            // Carica tutte le proposte
+            const allProposals = await governanceService.getProposals(0, count);
+            
+            // Organizza le proposte per indirizzo della campagna per accesso rapido
+            const proposalsByCampaign = {};
+            allProposals.forEach(proposal => {
+                proposalsByCampaign[proposal.campaignAddress.toLowerCase()] = proposal;
+            });
+            
+            setProposals(allProposals);
+            setCampaignProposals(proposalsByCampaign);
+            
+            // Se l'utente è connesso, calcola il potere di voto per le proposte attive
+            if (state.selectedAddress) {
+                const votingPowerMap = {};
+                
+                for (const proposal of allProposals) {
+                    if (proposal.status === 0 && !proposal.executed) { // Solo per proposte attive
+                        try {
+                            const votingPower = await governanceService.calculateVotingPower(
+                                state.selectedAddress, 
+                                proposal.id
+                            );
+                            votingPowerMap[proposal.id] = votingPower;
+                        } catch (error) {
+                            console.error(`Errore nel calcolo del potere di voto per proposta ${proposal.id}:`, error);
+                        }
+                    }
+                }
+                
+                setUserVotingPower(votingPowerMap);
+            }
+        } catch (error) {
+            console.error("Errore nel caricamento delle proposte:", error);
+            setProposals([]);
+            setCampaignProposals({});
+        } finally {
+            setProposalsLoading(false);
+        }
+    };
+
+    /**
+     * Vota su una proposta di governance per approvare o rifiutare una campagna
+     * @param {number} proposalId - ID della proposta
+     * @param {boolean} support - true per approvare, false per rifiutare
+     * @returns {Promise<Object>} - Ricevuta della transazione
+     */
+    const voteOnProposal = async (proposalId, support) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Invio voto..." }));
+            
+            const receipt = await governanceService.vote(proposalId, support);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: receipt.transactionHash }));
+            
+            // Ricarica le proposte dopo il voto
+            await loadProposals();
+            
+            // Ricarica le campagne per riflettere eventuali cambiamenti di stato
+            await loadCampaigns();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore nell'invio del voto:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
+        }
+    };
+
+    const hasVoted = async (proposalId, voter) => {
+        return await governanceService.hasVoted(proposalId, voter);
+    };
+
+    /**
+     * Finalizza una proposta scaduta (solo per admin)
+     * @param {number} proposalId - ID della proposta 
+     * @returns {Promise<Object>} - Ricevuta della transazione
+     */
+    const finalizeProposal = async (proposalId) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Finalizzazione proposta..." }));
+            
+            const receipt = await governanceService.finalizeExpiredProposal(proposalId);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: receipt.transactionHash }));
+            
+            // Ricarica le proposte dopo la finalizzazione
+            await loadProposals();
+            
+            // Ricarica le campagne per riflettere eventuali cambiamenti di stato
+            await loadCampaigns();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore nella finalizzazione della proposta:", error);
+            setState(prevState => ({
+                ...prevState,
+                txBeingSent: null,
+                transactionError: error
+            }));
+            throw error;
         }
     };
     
@@ -973,6 +1164,15 @@ export function Web3Provider({ children }) {
         userCampaigns,
         userCampaignsLoading,
         isAuthorizedCreator,
+        proposals,
+        proposalsLoading,
+        campaignProposals,
+        userVotingPower,
+        isAdmin,
+        loadProposals,
+        voteOnProposal,
+        hasVoted,
+        finalizeProposal,
         loadCampaigns,
         makeDonation,
         creatorRequest,

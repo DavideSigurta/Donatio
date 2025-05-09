@@ -53,6 +53,9 @@ contract Campaign {
     // Factory che ha creato questa campagna
     address public factory;
 
+    // Sistema di governance
+    address public governanceSystem;
+
     // Registro delle transazioni
     TransactionRegistry public transactionRegistry;
     
@@ -96,13 +99,22 @@ contract Campaign {
     }
 
     modifier onlyBeneficiaryOrMilestoneManager() {
-    require(
-        msg.sender == beneficiary || msg.sender == address(milestoneManager),
-        "Solo il beneficiario o il MilestoneManager possono eseguire questa azione"
-    );
-    _;
-}
-    
+        require(
+            msg.sender == beneficiary || msg.sender == address(milestoneManager),
+            "Solo il beneficiario o il MilestoneManager possono eseguire questa azione"
+        );
+        _;
+    }
+
+    // Da aggiungere con gli altri modificatori
+    modifier onlyFactoryOrGovernance() {
+        require(
+            msg.sender == factory || msg.sender == governanceSystem,
+            "Solo la factory o il sistema di governance possono eseguire questa azione"
+        );
+        _;
+    }
+        
     /**
      * @dev Costruttore che inizializza la campagna
      */
@@ -128,7 +140,7 @@ contract Campaign {
         goalAmount = _goalAmount;
         creator = msg.sender;
         factory = msg.sender; // La factory è il deployer iniziale
-        active = true;
+        active = false;
         createdAt = block.timestamp;
         dntToken = Token(_dntToken);
         transactionRegistry = TransactionRegistry(_registryAddress);
@@ -353,12 +365,26 @@ contract Campaign {
         require(
             msg.sender == factory || 
             msg.sender == creator || 
-            msg.sender == address(milestoneManager),
-            "Solo il factory, creator o milestone manager possono modificare lo stato"
+            msg.sender == address(milestoneManager) ||
+            msg.sender == governanceSystem,
+            "Solo il factory, creator, governance o milestone manager possono modificare lo stato"
         );
         active = _active;
         emit CampaignUpdated(title, description, active);
+    }   
+
+    /**
+     * @dev Imposta l'indirizzo del sistema di governance
+     * @param _governanceSystem Indirizzo del contratto GovernanceSystem
+     */
+    function setGovernanceSystem(address _governanceSystem) external {
+        require(
+            msg.sender == factory || governanceSystem == address(0),
+            "Sistema di governance gia' impostato"
+        );
+        governanceSystem = _governanceSystem;
     }
+
     /**
      * @dev Restituisce il numero totale di donazioni
      */

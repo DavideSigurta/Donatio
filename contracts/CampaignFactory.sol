@@ -7,6 +7,7 @@ import "./Token.sol";
 import "./TransactionRegistry.sol";
 import "./CreatorRequestManager.sol";
 import "./MilestoneManager.sol";
+import "./GovernanceSystem.sol";
 import "hardhat/console.sol";
 
 /**
@@ -34,6 +35,9 @@ contract CampaignFactory {
     
     // Manager delle milestone
     MilestoneManager public milestoneManager;
+
+    // Indirizzo del contratto di governance
+    GovernanceSystem public governanceSystem;
 
     // Eventi
     event CampaignCreated(address indexed campaignAddress, address indexed creator, string title);
@@ -128,6 +132,14 @@ contract CampaignFactory {
         
         // Segna le milestone come configurate nella campagna
         newCampaign.setMilestonesConfigured();
+
+        // Imposta il sistema di governance se configurato
+        if (address(governanceSystem) != address(0)) {
+            newCampaign.setGovernanceSystem(address(governanceSystem));
+        } else {
+            // Se non c'è sistema di governance, attiva direttamente la campagna
+            newCampaign.setActive(true);
+        }
         
         // Registra la campagna
         address campaignAddress = address(newCampaign);
@@ -135,6 +147,11 @@ contract CampaignFactory {
         creatorToCampaigns[msg.sender].push(campaignAddress);
         
         emit CampaignCreated(campaignAddress, msg.sender, _title);
+
+        // Se il sistema di governance è configurato, crea una proposta di voto
+        if (address(governanceSystem) != address(0)) {
+            governanceSystem.createProposal(campaignAddress, _goalAmount);
+        }
         
         return campaignAddress;
     }
@@ -187,5 +204,13 @@ contract CampaignFactory {
      */
     function isAuthorizedCreator(address _address) external view returns (bool) {
         return requestManager.isAuthorizedCreator(_address);
+    }
+
+    /**
+     * @dev Imposta il contratto di governance
+     */
+    function setGovernanceSystem(address _governanceAddress) external onlyOwner {
+        require(_governanceAddress != address(0), "Indirizzo di governance non valido");
+        governanceSystem = GovernanceSystem(_governanceAddress);
     }
 }

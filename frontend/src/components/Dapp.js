@@ -17,6 +17,7 @@ import { GlobalTransactionsPage } from "../pages/GlobalTransactionsPage";
 import { CreateCampaignPage } from "../pages/CreateCampaignPage";
 import { RequestCreatorPage } from "../pages/RequestCreatorPage";
 import { CreatorRequestsPage } from "../pages/CreatorRequestsPage";
+import { GovernanceDashboardPage } from "../pages/GovernanceDashboardPage"; // Aggiungi questo import
 
 // Componenti comuni
 import { NoWalletDetected } from "./common/NoWalletDetected";
@@ -27,7 +28,8 @@ export function Dapp() {
     selectedAddress,
     tokenData,
     isOwner,
-    isAuthorizedCreator
+    isAuthorizedCreator,
+    isAdmin
   } = useWeb3();
   
   // Se MetaMask non è installato
@@ -95,6 +97,16 @@ export function Dapp() {
           element={
             selectedAddress ? 
               (tokenData ? (isOwner ? <CreatorRequestsPage /> : <Navigate to="/profile" replace />) : <Loading />) : 
+              <Navigate to="/" replace state={{ needsConnection: true }} />
+          } 
+        />
+        
+        {/* Nuova rotta per la dashboard di governance (solo admin) */}
+        <Route 
+          path="admin/governance" 
+          element={
+            selectedAddress ? 
+              (tokenData ? (isAdmin ? <GovernanceDashboardPage /> : <Navigate to="/profile" replace />) : <Loading />) : 
               <Navigate to="/" replace state={{ needsConnection: true }} />
           } 
         />

@@ -37,19 +37,19 @@ async function main() {
   await requestManager.deployed();
   console.log("CreatorRequestManager deployed to:", requestManager.address);
 
-  // 5.5 Deploy MilestoneManager contract (NUOVO)
+  // 5.5 Deploy MilestoneManager contract
   const MilestoneManager = await hre.ethers.getContractFactory("MilestoneManager");
   const milestoneManager = await MilestoneManager.deploy();
   await milestoneManager.deployed();
   console.log("MilestoneManager deployed to:", milestoneManager.address);
 
-  // 6. Deploy CampaignFactory contract (MODIFICATO)
+  // 6. Deploy CampaignFactory contract
   const CampaignFactory = await hre.ethers.getContractFactory("CampaignFactory");
   const campaignFactory = await CampaignFactory.deploy(
     token.address, 
     transactionRegistry.address, 
     requestManager.address,
-    milestoneManager.address  // Nuovo parametro
+    milestoneManager.address
   );
   await campaignFactory.deployed();
   console.log("CampaignFactory deployed to:", campaignFactory.address);
@@ -60,13 +60,23 @@ async function main() {
   console.log("CampaignFactory address set in CreatorRequestManager");
 
   // 7.5 Set CampaignFactory as admin of MilestoneManager
-  const currentAdmin = await milestoneManager.admin(); // Prima verifica l'admin corrente
+  const currentAdmin = await milestoneManager.admin();
   if (currentAdmin !== campaignFactory.address) {
-    // Solo se necessario, imposta CampaignFactory come admin del MilestoneManager
     const setAdminTx = await milestoneManager.setAdmin(campaignFactory.address);
     await setAdminTx.wait();
     console.log("CampaignFactory set as admin in MilestoneManager");
   }
+
+  // 7.6 Deploy GovernanceSystem contract (NUOVO)
+  const GovernanceSystem = await hre.ethers.getContractFactory("GovernanceSystem");
+  const governanceSystem = await GovernanceSystem.deploy(token.address, campaignFactory.address);
+  await governanceSystem.deployed();
+  console.log("GovernanceSystem deployed to:", governanceSystem.address);
+
+  // 7.7 Set GovernanceSystem in CampaignFactory (NUOVO)
+  const setGovernanceTx = await campaignFactory.setGovernanceSystem(governanceSystem.address);
+  await setGovernanceTx.wait();
+  console.log("GovernanceSystem address set in CampaignFactory");
 
   // 8. Authorize CampaignFactory as a manager in TransactionRegistry
   const authorizeManagerTx = await transactionRegistry.setManagerAuthorization(campaignFactory.address, true);
@@ -115,10 +125,16 @@ async function main() {
     JSON.stringify({ abi: JSON.parse(requestManager.interface.format("json")) }, null, 2)
   );
 
-  // Salvataggio dell'ABI di MilestoneManager (NUOVO)
+  // Salvataggio dell'ABI di MilestoneManager
   fs.writeFileSync(
     path.join(contractsDir, "MilestoneManager.json"),
     JSON.stringify({ abi: JSON.parse(milestoneManager.interface.format("json")) }, null, 2)
+  );
+
+  // Salvataggio dell'ABI di GovernanceSystem (NUOVO)
+  fs.writeFileSync(
+    path.join(contractsDir, "GovernanceSystem.json"),
+    JSON.stringify({ abi: JSON.parse(governanceSystem.interface.format("json")) }, null, 2)
   );
 
   // Salvataggio aggiornato degli indirizzi dei contratti (MODIFICATO)
@@ -130,7 +146,8 @@ async function main() {
       TransactionRegistry: transactionRegistry.address,
       CampaignFactory: campaignFactory.address,
       CreatorRequestManager: requestManager.address,
-      MilestoneManager: milestoneManager.address  // Nuovo indirizzo
+      MilestoneManager: milestoneManager.address,
+      GovernanceSystem: governanceSystem.address  // Nuovo indirizzo
     }, null, 2)
   );
 

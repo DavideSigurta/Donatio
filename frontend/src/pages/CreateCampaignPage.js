@@ -13,7 +13,7 @@ const DETAILED_DESCRIPTION_LIMIT = 700;
 
 export function CreateCampaignPage() {
   const navigate = useNavigate();
-  const { selectedAddress, isAuthorizedCreator } = useWeb3();
+  const { selectedAddress, isAuthorizedCreator, loadProposals, loadCampaigns } = useWeb3();
   
   const [formData, setFormData] = useState({
     title: "",
@@ -114,6 +114,13 @@ export function CreateCampaignPage() {
       });
       
       console.log("Campagna creata:", result);
+    
+      // Piccolo ritardo per dare tempo alla blockchain di propagare la transazione
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Carica le nuove proposte e campagne aggiornate
+      await loadProposals();
+      await loadCampaigns();
       
       // Reindirizza alla pagina della nuova campagna
       navigate(`/campaigns/${result.campaignAddress}`);
