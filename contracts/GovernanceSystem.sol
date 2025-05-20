@@ -5,13 +5,14 @@ pragma solidity ^0.8.9;
 import "./Token.sol";
 import "./Campaign.sol";
 import "./CampaignFactory.sol";
+import "./MilestoneManager.sol";
 import "hardhat/console.sol";
 
 /**
  * @title Sistema di Governance per Donatio
- * @dev Gestisce il processo di votazione per l'approvazione delle campagne
+ * @dev Gestisce il processo di votazione per l'approvazione delle campagne e milestone
  * Gli utenti possono votare con potere proporzionale ai token DNT posseduti (con cap)
- * Le campagne vengono approvate o rifiutate in base ai risultati della votazione
+ * Le campagne e milestone vengono approvate o rifiutate in base ai risultati della votazione
  */
 contract GovernanceSystem {
     // Riferimento al contratto del token DNT
@@ -26,7 +27,10 @@ contract GovernanceSystem {
     uint256 public votingPeriod = 5 minutes;
     
     // Enumerazione per lo stato delle proposte
-    enum ProposalStatus { ACTIVE, APPROVED, REJECTED, EXPIRED }
+    enum ProposalStatus { ACTIVE, APPROVED, REJECTED, EXPIRED, READY_FOR_EXECUTION }
+    
+    // Tipo di proposta: campagna o milestone
+    enum ProposalType { CAMPAIGN, MILESTONE }
 
     // Struttura per le proposte di voto
     struct Proposal {
@@ -40,6 +44,8 @@ contract GovernanceSystem {
         uint256 endTime;
         ProposalStatus status;
         bool executed;
+        ProposalType proposalType;    // Tipo di proposta (campagna o milestone)
+        uint256 milestoneIndex;       // Indice della milestone (solo per proposte di tipo MILESTONE)
     }
     
     // Mappatura degli indirizzi votanti per ogni proposta
@@ -48,10 +54,11 @@ contract GovernanceSystem {
     Proposal[] public proposals;
     
     // EVENTI
-    event ProposalCreated(uint256 indexed proposalId, address indexed campaignAddress, uint256 endTime);
+    event ProposalCreated(uint256 indexed proposalId, address indexed campaignAddress, uint256 endTime, ProposalType proposalType);
     event VoteCast(uint256 indexed proposalId, address indexed voter, bool support, uint256 votingPower);
     event ProposalExecuted(uint256 indexed proposalId, ProposalStatus status);
     event VotingPeriodChanged(uint256 newPeriod);
+    event ProposalReadyForExecution(uint256 indexed proposalId, bool isApproval);
 
     /**
      * @dev Modifier che limita l'esecuzione di funzioni all'admin
@@ -99,13 +106,76 @@ contract GovernanceSystem {
             startTime: block.timestamp,
             endTime: block.timestamp + votingPeriod,
             status: ProposalStatus.ACTIVE,
-            executed: false
+            executed: false,
+            proposalType: ProposalType.CAMPAIGN,   // Imposta il tipo di proposta come CAMPAIGN
+            milestoneIndex: 0                      // Non rilevante per proposte di tipo CAMPAIGN
         });
         
         proposals.push(newProposal);
         uint256 proposalId = proposals.length - 1;
         
-        emit ProposalCreated(proposalId, _campaignAddress, newProposal.endTime);
+        emit ProposalCreated(proposalId, _campaignAddress, newProposal.endTime, ProposalType.CAMPAIGN);
+        
+        return proposalId;
+    }
+    
+    /**
+     * @dev Crea una proposta per l'approvazione di una milestone
+     * @param _campaignAddress Indirizzo del contratto della campagna
+     * @param _milestoneIndex Indice della milestone da approvare
+     * @return proposalId ID della proposta creata
+     */
+    function createMilestoneProposal(address _campaignAddress, uint256 _milestoneIndex) external returns (uint256) {
+        // Solo il contract factory, la campagna stessa o l'admin possono creare proposte per milestone
+        require(
+            msg.sender == address(campaignFactory) || 
+            msg.sender == admin || 
+            msg.sender == _campaignAddress || 
+            msg.sender == Campaign(_campaignAddress).beneficiary(),
+            "Solo la factory, l'admin o la campagna possono creare proposte per milestone"
+        );
+        
+        // Ottieni riferimento alla campagna e al milestone manager
+        Campaign campaign = Campaign(_campaignAddress);
+        MilestoneManager milestoneManager = MilestoneManager(campaign.milestoneManager());
+        
+        // Verifica che la milestone esista e sia completamente finanziata
+        (string memory title, , uint256 targetAmount, uint256 raisedAmount, bool approved, ) = 
+            milestoneManager.getMilestone(_campaignAddress, _milestoneIndex);
+        
+        require(bytes(title).length > 0, "Milestone non esistente");
+        require(raisedAmount >= targetAmount, "La milestone deve essere completamente finanziata");
+        require(!approved, "La milestone e' gia' stata approvata");
+        
+        // Se non è la prima milestone (indice 0), verifica che la precedente sia stata approvata
+        if (_milestoneIndex > 0) {
+            (, , , , bool previousApproved, ) = milestoneManager.getMilestone(_campaignAddress, _milestoneIndex - 1);
+            require(previousApproved, "La milestone precedente deve essere approvata prima");
+        }
+        
+        // Calcola la quota di approvazione (come per le campagne)
+        uint256 approvalQuota = targetAmount / 10;
+        
+        // Crea e memorizza la nuova proposta
+        Proposal memory newProposal = Proposal({
+            id: proposals.length,
+            campaignAddress: _campaignAddress,
+            targetAmount: targetAmount,
+            approvalQuota: approvalQuota,
+            positiveVotes: 0,
+            negativeVotes: 0,
+            startTime: block.timestamp,
+            endTime: block.timestamp + votingPeriod,
+            status: ProposalStatus.ACTIVE,
+            executed: false,
+            proposalType: ProposalType.MILESTONE,
+            milestoneIndex: _milestoneIndex
+        });
+        
+        proposals.push(newProposal);
+        uint256 proposalId = proposals.length - 1;
+        
+        emit ProposalCreated(proposalId, _campaignAddress, newProposal.endTime, ProposalType.MILESTONE);
         
         return proposalId;
     }
@@ -116,43 +186,89 @@ contract GovernanceSystem {
      * @param _support true se il voto è favorevole, false se è contrario
      */
     function vote(uint256 _proposalId, bool _support) external {
+        console.log("=== VOTE START ===");
+        console.log("Proposal ID:", _proposalId);
+        console.log("Support:", _support);
+        console.log("Sender:", msg.sender);
+
         Proposal storage proposal = proposals[_proposalId];
         
         // Verifiche di validità
+        console.log("Status check - status:", uint256(proposal.status));
         require(proposal.status == ProposalStatus.ACTIVE, "La proposta non e' attiva");
+        
+        console.log("Time check - current:", block.timestamp, "end:", proposal.endTime);
         require(block.timestamp <= proposal.endTime, "Votazione terminata");
+        
+        console.log("Already voted check:", hasVoted[_proposalId][msg.sender]);
         require(!hasVoted[_proposalId][msg.sender], "Hai gia' votato per questa proposta");
         
         // Calcola il potere di voto
-        uint256 votingPower = calculateVotingPower(msg.sender, proposal.approvalQuota);
+        uint256 votingPower = calculateVotingPower(msg.sender, _proposalId);
+        console.log("Voting power calculated:", votingPower);
         require(votingPower > 0, "Non hai potere di voto");
         
         // Registra il voto
         if (_support) {
             proposal.positiveVotes += votingPower;
+            console.log("Added positive votes, total now:", proposal.positiveVotes);
         } else {
             proposal.negativeVotes += votingPower;
+            console.log("Added negative votes, total now:", proposal.negativeVotes);
         }
         
         hasVoted[_proposalId][msg.sender] = true;
         
         emit VoteCast(_proposalId, msg.sender, _support, votingPower);
         
+        console.log("Before checkProposalOutcome");
         // Verifica se la proposta può essere risolta immediatamente
-        checkProposalOutcome(_proposalId);
+        bool executed = checkProposalOutcome(_proposalId);
+        console.log("After checkProposalOutcome, executed:", executed);
+        console.log("=== VOTE END ===");
+    }
+    
+    /**
+     * @dev Verifica se un utente ha già votato per una proposta specifica
+     * @param _proposalId ID della proposta
+     * @param _voter Indirizzo del votante
+     * @return true se l'utente ha già votato
+     */
+    function hasUserVoted(uint256 _proposalId, address _voter) external view returns (bool) {
+        return hasVoted[_proposalId][_voter];
     }
     
     /**
      * @dev Calcola il potere di voto di un utente con limite massimo
      * @param _voter Indirizzo del votante
-     * @param _approvalQuota Quota di approvazione per la proposta
+     * @param _proposalId ID della proposta
      * @return Potere di voto calcolato
      */
-    function calculateVotingPower(address _voter, uint256 _approvalQuota) public view returns (uint256) {
+    function calculateVotingPower(address _voter, uint256 _proposalId) public view returns (uint256) {
+        Proposal storage proposal = proposals[_proposalId];
         uint256 tokenBalance = token.balanceOf(_voter);
+        uint256 maxVotingPower;
         
-        // Cap massimo al 20% della quota di approvazione
-        uint256 maxVotingPower = _approvalQuota * 20 / 100;
+        if (proposal.proposalType == ProposalType.MILESTONE) {
+            // Per le proposte di milestone: 
+            // - 20% della quota per i donatori
+            // - 15% della quota per i non donatori
+            Campaign campaign = Campaign(proposal.campaignAddress);
+            
+            // Il contratto Campaign deve avere una funzione isDonator
+            bool isDonator = campaign.isDonator(_voter);
+            
+            if (isDonator) {
+                // 20% per i donatori
+                maxVotingPower = proposal.approvalQuota * 20 / 100;
+            } else {
+                // 15% per i non donatori
+                maxVotingPower = proposal.approvalQuota * 15 / 100;
+            }
+        } else {
+            // Per le proposte di campagna, usa il cap standard del 20%
+            maxVotingPower = proposal.approvalQuota * 20 / 100;
+        }
         
         // Restituisce il minore tra il saldo token e il cap
         return tokenBalance < maxVotingPower ? tokenBalance : maxVotingPower;
@@ -173,28 +289,75 @@ contract GovernanceSystem {
         
         // Approva se ha raggiunto la soglia positiva (50% della quota)
         if (proposal.positiveVotes >= proposal.approvalQuota / 2) {
-            proposal.status = ProposalStatus.APPROVED;
-            proposal.executed = true;
+            // Imposta come READY_FOR_EXECUTION invece di eseguire immediatamente
+            proposal.status = ProposalStatus.READY_FOR_EXECUTION;
+            proposal.executed = false; // Resta false finché non verrà effettivamente eseguita
             
-            // Attiva la campagna
-            Campaign(proposal.campaignAddress).setActive(true);
-            
-            emit ProposalExecuted(_proposalId, ProposalStatus.APPROVED);
+            // Emetti un evento per notificare che la proposta è pronta per essere finalizzata
+            emit ProposalReadyForExecution(_proposalId, true); // true = approvazione
             return true;
         }
         
         // Rifiuta se ha raggiunto la soglia negativa (30% della quota)
         if (proposal.negativeVotes >= proposal.approvalQuota * 3 / 10) {
-            proposal.status = ProposalStatus.REJECTED;
-            proposal.executed = true;
+            // Imposta come READY_FOR_EXECUTION invece di eseguire immediatamente
+            proposal.status = ProposalStatus.READY_FOR_EXECUTION;
+            proposal.executed = false; // Resta false finché non verrà effettivamente eseguita
             
-            // La campagna rimane inattiva
-            
-            emit ProposalExecuted(_proposalId, ProposalStatus.REJECTED);
+            // Emetti un evento per notificare che la proposta è pronta per essere finalizzata
+            emit ProposalReadyForExecution(_proposalId, false); // false = rifiuto
             return true;
         }
         
         return false;
+    }
+
+    /**
+     * @dev Esegue una proposta approvata o rifiutata
+     * @param _proposalId ID della proposta
+     */
+    function executeProposal(uint256 _proposalId) external {
+        Proposal storage proposal = proposals[_proposalId];
+        
+        // Verifica che la proposta sia pronta per l'esecuzione
+        require(proposal.status == ProposalStatus.READY_FOR_EXECUTION, "La proposta non e' pronta per l'esecuzione");
+        
+        // Impedisci che qualsiasi utente possa eseguire la proposta
+        Campaign campaign = Campaign(proposal.campaignAddress);
+        require(
+            msg.sender == campaign.beneficiary() || msg.sender == campaign.creator() || msg.sender == admin,
+            "Solo il beneficiario, il creatore o l'admin possono eseguire questa proposta"
+        );
+        
+        // Verifica quale azione deve essere eseguita in base ai voti
+        bool isApproval = proposal.positiveVotes >= proposal.approvalQuota / 2;
+        
+        if (isApproval) {
+            proposal.status = ProposalStatus.APPROVED;
+            
+            if (proposal.proposalType == ProposalType.CAMPAIGN) {
+                // Attiva la campagna
+                campaign.setActive(true);
+            } else if (proposal.proposalType == ProposalType.MILESTONE) {
+                // Approva la milestone
+                MilestoneManager milestoneManager = MilestoneManager(campaign.milestoneManager());
+                milestoneManager.approveMilestone(proposal.campaignAddress, proposal.milestoneIndex);
+            }
+        } else {
+            proposal.status = ProposalStatus.REJECTED;
+            
+            if (proposal.proposalType == ProposalType.MILESTONE) {
+                // Rifiuta la milestone
+                MilestoneManager milestoneManager = MilestoneManager(campaign.milestoneManager());
+                milestoneManager.rejectMilestone(proposal.campaignAddress, proposal.milestoneIndex, "Rifiutata tramite votazione");
+                
+                // Esegui il rimborso
+                milestoneManager.adminRefundMilestone(proposal.campaignAddress, proposal.milestoneIndex);
+            }
+        }
+        
+        proposal.executed = true;
+        emit ProposalExecuted(_proposalId, proposal.status);
     }
     
     /**
@@ -212,7 +375,19 @@ contract GovernanceSystem {
         proposal.status = ProposalStatus.EXPIRED;
         proposal.executed = true;
         
-        // La campagna rimane inattiva
+        if (proposal.proposalType == ProposalType.CAMPAIGN) {
+            // La campagna rimane inattiva (comportamento esistente)
+        } else if (proposal.proposalType == ProposalType.MILESTONE) {
+            // Per le milestone scadute, considerale come rifiutate
+            Campaign campaign = Campaign(proposal.campaignAddress);
+            MilestoneManager milestoneManager = MilestoneManager(campaign.milestoneManager());
+            
+            // Prima rifiuta la milestone
+            milestoneManager.rejectMilestone(proposal.campaignAddress, proposal.milestoneIndex, "Votazione scaduta senza raggiungere il quorum");
+            
+            // Poi esegui il rimborso - AGGIUNGI QUESTA RIGA
+            milestoneManager.adminRefundMilestone(proposal.campaignAddress, proposal.milestoneIndex);
+        }
         
         emit ProposalExecuted(_proposalId, ProposalStatus.EXPIRED);
     }
@@ -256,8 +431,11 @@ contract GovernanceSystem {
         uint256 startTime,
         uint256 endTime,
         ProposalStatus status,
-        bool executed
+        bool executed,
+        ProposalType proposalType,
+        uint256 milestoneIndex
     ) {
+        require(_proposalId < proposals.length, "Proposal does not exist");
         Proposal storage proposal = proposals[_proposalId];
         return (
             proposal.campaignAddress,
@@ -268,7 +446,9 @@ contract GovernanceSystem {
             proposal.startTime,
             proposal.endTime,
             proposal.status,
-            proposal.executed
+            proposal.executed,
+            proposal.proposalType,
+            proposal.milestoneIndex
         );
     }
 }

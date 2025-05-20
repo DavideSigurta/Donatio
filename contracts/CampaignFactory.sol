@@ -155,20 +155,6 @@ contract CampaignFactory {
         
         return campaignAddress;
     }
-    
-    /**
-     * @dev Approva una milestone (solo admin)
-     */
-    function approveMilestone(address campaignAddress, uint256 milestoneIndex) external onlyOwner {
-        milestoneManager.approveMilestone(campaignAddress, milestoneIndex);
-    }
-
-    /**
-     * @dev Rifiuta una milestone (solo admin)
-     */
-    function rejectMilestone(address campaignAddress, uint256 milestoneIndex, string memory reason) external onlyOwner {
-        milestoneManager.rejectMilestone(campaignAddress, milestoneIndex, reason);
-    }
 
     /**
      * @dev Restituisce il numero totale di campagne

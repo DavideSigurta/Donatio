@@ -95,6 +95,7 @@ export function TransactionsPage() {
                 <option value="sell">Vendite</option>
                 <option value="donation">Donazioni</option>
                 <option value="milestone-release">Rilasci Milestone</option>
+                <option value="milestone-refund">Rimborsi Milestone</option>
               </select>
             </div>
           </div>

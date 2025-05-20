@@ -8,6 +8,8 @@ import "./Campaign.sol";
  * @title MilestoneManager
  * @dev Contratto per gestire le milestone delle campagne di raccolta fondi
  */
+import "hardhat/console.sol";
+
 contract MilestoneManager {
     // Strutture dati per milestone
     mapping(address => string[]) public milestoneTitles;
@@ -23,16 +25,21 @@ contract MilestoneManager {
     mapping(address => mapping(uint256 => string)) public rejectionReasons;
     mapping(address => uint256) private totalMilestoneTarget;
     mapping(address => mapping(address => bool)) public authorizedCampaigns;
+    mapping(address => mapping(uint256 => string)) public milestoneReports;
+    mapping(address => mapping(uint256 => uint256)) public reportSubmissionDeadlines;
     
     // Admin del contratto (CampaignFactory)
     address public admin;
+
+    // Periodo di tempo per la scadenza della submission del report
+    uint256 public reportSubmissionPeriod = 5 minutes;
     
     // Eventi
     event MilestoneAdded(address indexed campaignAddress, uint256 index, string title, uint256 targetAmount);
     event MilestoneApproved(address indexed campaignAddress, uint256 indexed milestoneIndex, string title, uint256 amount, uint256 timestamp);
     event MilestoneRejected(address indexed campaignAddress, uint256 indexed milestoneIndex, string title, uint256 amount, string reason, uint256 timestamp);
+    event MilestoneReportSubmitted(address indexed campaignAddress, uint256 indexed milestoneIndex, string report, uint256 timestamp);
 
-    
     constructor() {
         admin = msg.sender;
     }
@@ -123,8 +130,8 @@ contract MilestoneManager {
      * @dev Distribuisce fondi alle milestone di una campagna
      */
     function distributeFundsToMilestones(
-        address campaignAddress, 
-        uint256 amount
+    address campaignAddress, 
+    uint256 amount
     ) external onlyAuthorized(campaignAddress) returns (bool) {
         require(milestonesInitialized[campaignAddress], "Milestone non finalizzate");
         
@@ -144,6 +151,20 @@ contract MilestoneManager {
                 // Se questa milestone è stata completamente finanziata, passa alla successiva
                 if (milestoneRaised[campaignAddress][i] >= milestoneTargets[campaignAddress][i] && 
                     i == currentMilestoneIndex[campaignAddress]) {
+                    
+                    // Se è la prima milestone (indice 0), approvala automaticamente
+                    if (i == 0 && !milestoneApproved[campaignAddress][0]) {
+                        milestoneApproved[campaignAddress][0] = true;
+                        emit MilestoneApproved(
+                            campaignAddress, 
+                            0, 
+                            milestoneTitles[campaignAddress][0],  // Titolo della milestone
+                            milestoneTargets[campaignAddress][0], // Importo target
+                            block.timestamp                      // Timestamp corrente
+                        );
+                    }
+                    
+                    // Avanza comunque alla milestone successiva
                     currentMilestoneIndex[campaignAddress] = i + 1;
                 }
             } else {
@@ -151,13 +172,33 @@ contract MilestoneManager {
             }
         }
         
-        return true;
+        return (remainingAmount == 0);
     }
 
     /**
-     * @dev Approva una milestone e rilascia automaticamente i fondi (solo admin)
+     * @dev Approva una milestone e rilascia automaticamente i fondi 
      */
-    function approveMilestone(address campaignAddress, uint256 milestoneIndex) external onlyAdmin {
+    function approveMilestone(address campaignAddress, uint256 milestoneIndex) public {
+        // Verifica che il chiamante sia autorizzato: admin o governanceSystem
+        console.log("=== APPROVE MILESTONE START ===");
+        console.log("Campaign:", campaignAddress);
+        console.log("Milestone index:", milestoneIndex);
+        console.log("Caller:", msg.sender);
+        
+        // Verifica che il chiamante sia autorizzato
+        address govSystem = Campaign(campaignAddress).governanceSystem();
+        console.log("Expected governance system:", govSystem);
+        console.log("Admin address:", admin);
+        
+        bool isGovSystem = msg.sender == govSystem;
+        bool isAdmin = msg.sender == admin;
+        console.log("Is governance system:", isGovSystem);
+        console.log("Is admin:", isAdmin);
+        
+        require(isGovSystem || isAdmin, "Non autorizzato solo governance o admin possono approvare");
+        
+        console.log("Authorization passed, continuing with approval");
+    
         require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
         require(!milestoneApproved[campaignAddress][milestoneIndex], "Milestone gia' approvata");
         
@@ -172,22 +213,16 @@ contract MilestoneManager {
                 milestoneApproved[campaignAddress][milestoneIndex - 1],
                 "Devi prima approvare la milestone precedente"
             );
+            
+            require(
+                bytes(milestoneReports[campaignAddress][milestoneIndex - 1]).length > 0,
+                "E' richiesto un report per la milestone precedente"
+            );
         }
-        
+
         // Imposta lo stato di approvazione
         milestoneApproved[campaignAddress][milestoneIndex] = true;
         milestoneApprovedAt[campaignAddress][milestoneIndex] = block.timestamp;
-        
-        // Ottieni una reference al contratto Campaign
-        Campaign campaign = Campaign(campaignAddress);
-        
-        // Chiama withdraw() sulla campaign
-        try campaign.withdraw() {
-            // Withdraw eseguito con successo
-        } catch {
-            // Se la chiamata fallisce, l'approvazione rimane valida
-            // Il beneficiario potrà sempre chiamare withdraw() manualmente in seguito
-        }
         
         emit MilestoneApproved(
             campaignAddress,
@@ -263,9 +298,29 @@ contract MilestoneManager {
         return totalAvailable;
     }
     /**
-     * @dev Rifiuta una milestone e avvia il rimborso dei fondi (solo admin)
+     * @dev Rifiuta una milestone e avvia il rimborso dei fondi 
      */
-    function rejectMilestone(address campaignAddress, uint256 milestoneIndex, string memory reason) external onlyAdmin {
+    function rejectMilestone(address campaignAddress, uint256 milestoneIndex, string memory reason) public {
+        // Verifica che il chiamante sia autorizzato: admin o governanceSystem
+        console.log("=== REJECT MILESTONE START ===");
+        console.log("Campaign:", campaignAddress);
+        console.log("Milestone index:", milestoneIndex);
+        console.log("Caller:", msg.sender);
+        
+        // Verifica che il chiamante sia autorizzato
+        address govSystem = Campaign(campaignAddress).governanceSystem();
+        console.log("Expected governance system:", govSystem);
+        console.log("Admin address:", admin);
+        
+        bool isGovSystem = msg.sender == govSystem;
+        bool isAdmin = msg.sender == admin;
+        console.log("Is governance system:", isGovSystem);
+        console.log("Is admin:", isAdmin);
+        
+        require(isGovSystem || isAdmin, "Non autorizzato solo governance o admin possono approvare");
+        
+        console.log("Authorization passed, continuing with rejecting");
+        
         require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
         require(!milestoneApproved[campaignAddress][milestoneIndex], "Milestone gia' approvata");
         require(!milestoneRejected[campaignAddress][milestoneIndex], "Milestone gia' rifiutata");
@@ -290,14 +345,6 @@ contract MilestoneManager {
             // Se fallisce, continuiamo comunque con il rimborso
         }
         
-        // Effettua il rimborso ai donatori
-        try campaign.refundDonors(milestoneIndex) {
-            // Rimborso eseguito con successo
-        } catch {
-            // Se fallisce, il rifiuto rimane valido
-            // Gli utenti dovranno richiedere il rimborso manualmente
-        }
-        
         emit MilestoneRejected(
             campaignAddress,
             milestoneIndex, 
@@ -306,6 +353,123 @@ contract MilestoneManager {
             reason,
             block.timestamp
         );
+    }
+
+    /**
+    * @dev Esegue il rimborso per una milestone rifiutata (solo admin o governance)
+    * @param campaignAddress Indirizzo della campagna
+    * @param milestoneIndex Indice della milestone rifiutata
+    */
+    function adminRefundMilestone(address campaignAddress, uint256 milestoneIndex) external {
+        // Solo l'admin o il sistema di governance possono chiamare questa funzione
+        require(
+            msg.sender == admin || msg.sender == Campaign(campaignAddress).governanceSystem(),
+            "Solo admin o governance possono eseguire questa operazione"
+        );
+        
+        // Verifica che la milestone sia stata effettivamente rifiutata
+        require(milestoneRejected[campaignAddress][milestoneIndex], "La milestone non e' stata rifiutata");
+        
+        // Ottieni una reference al contratto Campaign
+        Campaign campaign = Campaign(campaignAddress);
+        
+        // Esegui il rimborso
+        campaign.refundDonors(milestoneIndex);
+    }
+
+    /**
+     * @dev Sottomette un report per una milestone
+     * @param campaignAddress Indirizzo della campagna
+     * @param milestoneIndex Indice della milestone
+     * @param report Testo del report
+     */
+    function submitMilestoneReport(address campaignAddress, uint256 milestoneIndex, string memory report) external {
+        // Solo il beneficiario della campagna può inviare report
+        Campaign campaign = Campaign(campaignAddress);
+        require(msg.sender == campaign.beneficiary(), "Solo il beneficiario puo' inviare report");
+        
+        // Verifica che la milestone esista
+        require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
+        
+        // Verifica che la milestone sia completamente finanziata
+        uint256 raisedAmount = milestoneRaised[campaignAddress][milestoneIndex];
+        uint256 targetAmount = milestoneTargets[campaignAddress][milestoneIndex];
+        require(raisedAmount >= targetAmount, "La milestone non e' completamente finanziata");
+        
+        require(milestoneFundsReleased[campaignAddress][milestoneIndex], "I fondi devono essere rilasciati prima di inviare il report");
+        
+        // Verifica che la milestone non sia rifiutata
+        require(!milestoneRejected[campaignAddress][milestoneIndex], "Milestone gia' rifiutata");
+        
+        // Verifica che il report non sia già stato inviato
+        require(bytes(milestoneReports[campaignAddress][milestoneIndex]).length == 0, "Report gia' inviato");
+        
+        // Se non è la prima milestone, verifica che la precedente sia stata approvata
+        if (milestoneIndex > 0) {
+            require(milestoneApproved[campaignAddress][milestoneIndex - 1], "La milestone precedente deve essere approvata prima");
+        }
+        
+        // Salva il report e imposta la deadline per la votazione
+        milestoneReports[campaignAddress][milestoneIndex] = report;
+        reportSubmissionDeadlines[campaignAddress][milestoneIndex] = block.timestamp + reportSubmissionPeriod;
+        
+        // Emetti un evento per il report inviato
+        emit MilestoneReportSubmitted(campaignAddress, milestoneIndex, report, block.timestamp);
+    }
+
+    /**
+     * @dev Ottiene il report di una milestone
+     * @param campaignAddress Indirizzo della campagna
+     * @param milestoneIndex Indice della milestone
+     * @return Il report della milestone
+     */
+    function getMilestoneReport(address campaignAddress, uint256 milestoneIndex) external view returns (string memory) {
+        require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
+        return milestoneReports[campaignAddress][milestoneIndex];
+    }
+
+    /**
+     * @dev Ottiene la deadline per la sottomissione del report di una milestone
+     * @param campaignAddress Indirizzo della campagna
+     * @param milestoneIndex Indice della milestone
+     * @return La deadline per la sottomissione del report
+     */
+    function getReportSubmissionDeadline(address campaignAddress, uint256 milestoneIndex) external view returns (uint256) {
+        require(milestoneIndex < milestoneTitles[campaignAddress].length, "Indice milestone non valido");
+        return reportSubmissionDeadlines[campaignAddress][milestoneIndex];
+    }
+
+    /**
+     * @dev Verifica se una milestone è pronta per la votazione
+     * @param campaignAddress Indirizzo della campagna
+     * @param milestoneIndex Indice della milestone
+     * @return true se la milestone è pronta per la votazione
+     */
+    function isMilestoneReadyForVoting(address campaignAddress, uint256 milestoneIndex) external view returns (bool) {
+        // La milestone deve esistere
+        if (milestoneIndex >= milestoneTitles[campaignAddress].length) return false;
+        
+        // La milestone deve essere completamente finanziata
+        uint256 raisedAmount = milestoneRaised[campaignAddress][milestoneIndex];
+        uint256 targetAmount = milestoneTargets[campaignAddress][milestoneIndex];
+        if (raisedAmount < targetAmount) return false;
+        
+        // La milestone non deve essere già approvata o rifiutata
+        if (milestoneApproved[campaignAddress][milestoneIndex]) return false;
+        if (milestoneRejected[campaignAddress][milestoneIndex]) return false;
+        
+        // Se è la milestone 0, è sempre pronta per il voto (anche se verrà approvata automaticamente)
+        if (milestoneIndex == 0) return true;
+        
+        // Per le milestone successive alla prima:
+        // 1. La milestone precedente deve essere approvata
+        // 2. La milestone precedente deve avere un report
+        bool previousApproved = milestoneIndex > 0 ? 
+            milestoneApproved[campaignAddress][milestoneIndex - 1] : true;
+        bool previousHasReport = milestoneIndex > 0 ? 
+            bytes(milestoneReports[campaignAddress][milestoneIndex - 1]).length > 0 : true;
+        
+        return previousApproved && previousHasReport;
     }
 
     /**

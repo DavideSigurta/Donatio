@@ -357,6 +357,15 @@ contract Campaign {
         
         emit CampaignUpdated(title, description, active);
     }
+
+    /**
+     * @dev Verifica se un indirizzo ha donato a questa campagna
+     * @param _donor Indirizzo da verificare
+     * @return true se l'indirizzo ha effettuato una donazione
+     */
+    function isDonator(address _donor) public view returns (bool) {
+        return donors[_donor];
+    }
     
     /**
      * @dev Cambia lo stato attivo/inattivo della campagna

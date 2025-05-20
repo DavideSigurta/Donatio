@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWeb3 } from '../../contexts/Web3Context';
+import { MilestoneReportForm } from './MilestoneReportForm';
+import { VotingPanel } from './VotingPanel';
 
 /**
  * Componente che mostra la lista delle milestone di una campagna
@@ -10,61 +12,134 @@ import { useWeb3 } from '../../contexts/Web3Context';
  * @returns {JSX.Element} Componente React
  */
 const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
-  const { isOwner, approveMilestone, rejectMilestone } = useWeb3();
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
-  const [selectedMilestoneIndex, setSelectedMilestoneIndex] = useState(null);
-  const rejectedIndex = milestones ? milestones.findIndex(m => m.rejected) : -1;
 
-  // Gestisce l'approvazione di una milestone
-  const handleApprove = async (milestoneIndex) => {
-    if (window.confirm('Sei sicuro di voler approvare questa milestone?')) {
-      try {
-        await approveMilestone(campaignAddress, milestoneIndex);
-      } catch (error) {
-        console.error("Errore nell'approvazione della milestone:", error);
-        alert("Si è verificato un errore durante l'approvazione della milestone.");
-      }
-    }
-  };
+  const { 
+    selectedAddress, 
+    campaignProposals,
+    createMilestoneProposal,
+    withdrawMilestoneFunds,
+    executeProposal,
+    isMilestoneReadyForVoting
+  } = useWeb3();
+
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const rejectedIndex = milestones ? milestones.findIndex(m => m.rejected) : -1;
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [milestoneToProposalMap, setMilestoneToProposalMap] = useState({});
+  const [readyForVotingMilestones, setReadyForVotingMilestones] = useState({});
+  const [readyToExecuteProposals, setReadyToExecuteProposals] = useState({});
+  const [isCreatingProposal, setIsCreatingProposal] = useState(false);
+  const [isExecutingProposal, setIsExecutingProposal] = useState(false);
 
   const isRefundedDueToPreviousRejection = (index) => {
     return rejectedIndex !== -1 && index > rejectedIndex;
   };
-
-  // Gestisce l'apertura del modal per il rifiuto
-  const handleOpenRejectModal = (milestoneIndex) => {
-    setSelectedMilestoneIndex(milestoneIndex);
-    setRejectReason('');
-    setShowRejectModal(true);
-  };
   
-  // Gestisce il rifiuto di una milestone
-  const handleReject = async () => {
-    if (!rejectReason.trim()) {
-      alert("È necessario fornire una motivazione per il rifiuto.");
-      return;
+  // Controlla se l'utente è il creatore della campagna
+  const isBeneficiary = selectedAddress && milestones && milestones.length > 0 && 
+                    milestones[0].campaignBeneficiary && 
+                    milestones[0].campaignBeneficiary.toLowerCase() === selectedAddress.toLowerCase();
+
+  useEffect(() => {
+    if (campaignProposals && campaignAddress) {
+      const proposals = campaignProposals[campaignAddress.toLowerCase()];
+      console.log("Proposte per campagna:", proposals);
+      
+      if (proposals && proposals.length > 0) {
+        proposals.forEach(p => {
+          console.log(`Proposta ID ${p.id}, tipo: ${p.proposalType}, milestone: ${p.milestoneIndex}`, p);
+        });
+      }
+    }
+  }, [campaignProposals, campaignAddress]);
+
+  useEffect(() => {
+    if (campaignProposals && campaignAddress) {
+      const proposals = campaignProposals[campaignAddress.toLowerCase()] || [];
+      
+      if (proposals && proposals.length > 0) {
+        // Costruisci una mappa da indice milestone a proposta
+        const newMap = {};
+        
+        proposals.forEach(proposal => {
+          // Solo proposte di tipo MILESTONE (1)
+          if (proposal.proposalType === 1) {
+            // Converti l'indice in stringa per usarlo come chiave dell'oggetto
+            const milestoneIdx = String(proposal.milestoneIndex);
+            newMap[milestoneIdx] = proposal;
+            console.log(`Associata proposta ID ${proposal.id} alla milestone ${milestoneIdx}`);
+          }
+        });
+        
+        setMilestoneToProposalMap(newMap);
+        console.log("Mappa milestone -> proposta aggiornata:", newMap);
+      }
+    }
+  }, [campaignProposals, campaignAddress, refreshTrigger]);
+
+  // Verifica quali milestone sono pronte per la votazione
+  useEffect(() => {
+    const checkMilestones = async () => {
+      if (!campaignAddress || !milestones) return;
+      
+      const readyStatus = {};
+      for (let i = 0; i < milestones.length; i++) {
+        readyStatus[i] = await isMilestoneReadyForVoting(campaignAddress, i);
+      }
+      setReadyForVotingMilestones(readyStatus);
+    };
+    
+    checkMilestones();
+  }, [campaignAddress, milestones, isMilestoneReadyForVoting, refreshTrigger]);
+  
+  // Verifica quali proposte sono pronte per essere eseguite
+  useEffect(() => {
+    if (!campaignProposals || !campaignAddress) return;
+    
+    const proposals = campaignProposals[campaignAddress] || [];
+    const readyProposals = {};
+    
+    console.log("[DEBUG] Verifica proposte pronte per esecuzione, totali:", proposals.length);
+    
+    proposals.forEach(proposal => {
+      console.log(`[DEBUG] Proposta ${proposal.id}: tipo=${proposal.proposalType}, milestone=${proposal.milestoneIndex}, status=${proposal.status}, executed=${proposal.executed}`);
+      
+      // Status 4 = READY_FOR_EXECUTION
+      if (proposal.status === 4 && !proposal.executed) {
+        console.log(`[DEBUG] ✓ Proposta ${proposal.id} PRONTA per milestone ${proposal.milestoneIndex}`);
+        readyProposals[proposal.milestoneIndex] = proposal.id;
+      }
+    });
+
+    if (proposals.length === 0) {
+      // Controlla direttamente milestoneToProposalMap
+      Object.entries(milestoneToProposalMap).forEach(([milestoneIdx, proposal]) => {
+        if (proposal.status === 4 && !proposal.executed) {
+          console.log(`[DEBUG] ✓ Proposta ${proposal.id} PRONTA per milestone ${proposal.milestoneIndex} (da mappa)`);
+          readyProposals[milestoneIdx] = proposal.id;
+        }
+      });
     }
     
-    try {
-      await rejectMilestone(campaignAddress, selectedMilestoneIndex, rejectReason);
-      setShowRejectModal(false);
-    } catch (error) {
-      console.error("Errore nel rifiuto della milestone:", error);
-      alert("Si è verificato un errore durante il rifiuto della milestone.");
-    }
-  };
-  
+    console.log("[DEBUG] Proposte pronte trovate:", Object.keys(readyProposals).length);
+    setReadyToExecuteProposals(readyProposals);
+  }, [campaignProposals, campaignAddress, refreshTrigger, milestoneToProposalMap]);
+
+    
   // Determina lo stato di una milestone
   const getMilestoneStatus = (milestone, index, currentMilestoneIndex) => {
     if (milestone.rejected) {
       return { text: 'Rifiutata - Fondi Rimborsati', variant: 'danger' };
     } else if (isRefundedDueToPreviousRejection(index)) {
-      return { text: 'Fondi Rimborsati', variant: 'danger' }; // Stessa variante ma testo diverso
+      return { text: 'Fondi Rimborsati', variant: 'danger' };
     } else if (milestone.fundsReleased) {
       return { text: 'Fondi rilasciati', variant: 'success' };
     } else if (milestone.approved) {
       return { text: 'Approvata', variant: 'success' };
+    } else if (milestone.inVoting) {
+      return { text: 'In votazione', variant: 'warning' };
+    } else if (milestone.hasReport) {
+      return { text: 'Report inviato', variant: 'info' };
     } else if (parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount)) {
       return { text: 'Completamente finanziata', variant: 'primary' };
     } else if (index === currentMilestoneIndex) {
@@ -74,11 +149,64 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
     }
   };
   
+  // Gestisce la creazione della proposta di voto
+  const handleCreateMilestoneProposal = async (milestoneIndex) => {
+    try {
+      if (window.confirm('Sei sicuro di voler avviare la votazione per questa milestone?')) {
+        setIsCreatingProposal(true);
+        await createMilestoneProposal(campaignAddress, milestoneIndex);
+        setRefreshTrigger(prev => prev + 1);
+        alert('Votazione avviata con successo!');
+      }
+    } catch (error) {
+      console.error("Errore nella creazione della proposta:", error);
+      alert(`Si è verificato un errore: ${error.message || error}`);
+    } finally {
+      setIsCreatingProposal(false);
+    }
+  };
+  
+  // Gestisce l'esecuzione della proposta
+  const handleExecuteProposal = async (proposalId, milestoneIndex) => {
+    try {
+      if (window.confirm('Sei sicuro di voler finalizzare questa votazione?')) {
+        setIsExecutingProposal(true);
+        await executeProposal(proposalId);
+        setRefreshTrigger(prev => prev + 1);
+        alert('Votazione finalizzata con successo!');
+      }
+    } catch (error) {
+      console.error("Errore nell'esecuzione della proposta:", error);
+      alert(`Si è verificato un errore: ${error.message || error}`);
+    } finally {
+      setIsExecutingProposal(false);
+    }
+  };
+
+  const handleWithdrawFunds = async () => {
+    try {
+      if (window.confirm('Sei sicuro di voler ritirare i fondi disponibili?')) {
+        setIsWithdrawing(true); 
+        // Chiamata alla funzione withdraw del Web3Context
+        await withdrawMilestoneFunds(campaignAddress);
+        
+        // Aggiorna la vista dopo il prelievo
+        setRefreshTrigger(prev => prev + 1);
+        alert('Fondi ritirati con successo!');
+      }
+    } catch (error) {
+      console.error("Errore durante il ritiro dei fondi:", error);
+      alert(`Si è verificato un errore: ${error.message || error}`);
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+  
+  // Resto del codice invariato: loading e no data gestiti allo stesso modo
   if (isLoading) {
     return (
       <div className="text-center py-3">
         <div className="spinner-border spinner-border-sm text-primary" role="status">
-          <span className="visually-hidden">Caricamento...</span>
         </div>
         <p className="mt-2 mb-0">Caricamento milestone...</p>
       </div>
@@ -95,10 +223,14 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
     );
   }
   
-  // Trova l'indice della milestone attualmente in corso
   const currentMilestoneIndex = milestones.findIndex(m => 
     !m.fundsReleased && parseFloat(m.raisedAmount) < parseFloat(m.targetAmount)
   );
+  
+  // Trova le proposte relative alle milestone di questa campagna
+  const milestoneProposals = campaignProposals 
+    ? campaignProposals[campaignAddress] || [] 
+    : [];
   
   return (
     <div className="milestones-list">
@@ -120,6 +252,65 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
           progressPercentage >= 100 ? 'bg-success' : 
           progressPercentage > 50 ? 'bg-info' : 
           'bg-warning';
+        
+        let milestoneProposal = milestoneToProposalMap[String(milestone.index)];
+
+        if (!milestoneProposal && milestone.inVoting && milestoneProposals && milestoneProposals.length > 0) {
+          console.log(`Tentativo di recupero diretto per milestone ${milestone.index}`);
+          
+          // Prova tutti i possibili modi per trovare la corrispondenza
+          milestoneProposal = milestoneProposals.find(p => 
+            p.proposalType === 1 && (
+              String(p.milestoneIndex) === String(milestone.index) ||
+              Number(p.milestoneIndex) === Number(milestone.index) ||
+              p.milestoneIndex == milestone.index // Confronto loose intentionally
+            )
+          );
+          
+          if (milestoneProposal) {
+            console.log(`Proposta trovata con ricerca diretta: ID ${milestoneProposal.id}`);
+          }
+        }
+
+        if (milestone.inVoting) {
+          console.log(`Milestone ${milestone.index} contrassegnata come 'in votazione':`, {
+            propostaTrovata: !!milestoneProposal,
+            proposteDisponibili: milestoneProposals.map(p => ({
+              id: p.id,
+              type: p.proposalType,
+              milestoneIndex: p.milestoneIndex
+            }))
+          });
+        }
+        
+        // Determina se mostrare il form di report
+        const showReportForm = 
+          isBeneficiary && 
+          !milestone.rejected && 
+          !milestone.hasReport && 
+          milestone.fundsReleased; // Mostra il form solo se i fondi sono stati rilasciati 
+        
+        // Determina se mostrare il pulsante per creare proposta
+        const showCreateProposalBtn = 
+          isBeneficiary && 
+          !milestone.rejected && 
+          !milestone.approved && 
+          !milestone.inVoting &&
+          // Aggiungi questa condizione per nascondere il pulsante se c'è già una proposta pronta
+          !readyToExecuteProposals[milestone.index] &&
+          parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) &&
+          (index === 0 || (milestones[index - 1]?.approved && milestones[index - 1]?.hasReport));
+        
+        // Determina se mostrare il pulsante per ritirare i fondi
+        const showWithdrawButton = 
+          isBeneficiary && 
+          milestone.approved && 
+          !milestone.fundsReleased;
+        
+        // Determina se mostrare il pulsante per finalizzare la votazione
+        const showExecuteProposalBtn = 
+          isBeneficiary && 
+          readyToExecuteProposals[milestone.index] !== undefined;
         
         return (
           <div key={index} className="card mb-3">
@@ -150,6 +341,112 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
                 </div>
               </div>
 
+              {/* Pulsante per ritirare i fondi (solo per il creatore) */}
+              {showWithdrawButton && (
+                <div className="mt-3 text-center">
+                  <button 
+                    className="btn btn-success" 
+                    onClick={handleWithdrawFunds}
+                    disabled={isWithdrawing}
+                  >
+                    {isWithdrawing ? (
+                      <><span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Prelievo in corso...</>
+                    ) : (
+                      <><i className="bi bi-cash-coin me-2"></i> Ritira fondi</>
+                    )}
+                  </button>
+                  <div className="mt-2">
+                    <small className="text-muted">
+                      I fondi sono disponibili per il ritiro. Una volta prelevati, potrai inserire il report per la milestone successiva.
+                    </small>
+                  </div>
+                </div>
+              )}
+
+              {/* Mostra il report se presente */}
+              {milestone.hasReport && milestone.report && (
+                <div className="alert alert-info mt-3">
+                  <h6 className="mb-1">Report per la milestone:</h6>
+                  <p className="mb-0">{milestone.report}</p>
+                </div>
+              )}
+
+              {/* Mostra il form per l'invio del report (solo per il creatore) */}
+              {showReportForm && (
+                <MilestoneReportForm 
+                  campaignAddress={campaignAddress}
+                  milestoneIndex={milestone.index} 
+                  onSubmitSuccess={() => setRefreshTrigger(prev => prev + 1)}
+                />
+              )}
+              
+              {/* Pulsante per creare la proposta di votazione (solo per il creatore) */}
+              {showCreateProposalBtn && (
+                <div className="mt-3">
+                  <button 
+                    className="btn btn-primary w-100"
+                    onClick={() => handleCreateMilestoneProposal(milestone.index)}
+                    disabled={isCreatingProposal}
+                  >
+                    {isCreatingProposal ? (
+                      <><span className="spinner-border spinner-border-sm me-2"></span> Avvio votazione...</>
+                    ) : (
+                      <><i className="bi bi-check-circle me-2"></i> Avvia votazione per questa milestone</>
+                    )}
+                  </button>
+                  <div className="mt-2">
+                    <small className="text-muted">
+                      Questa milestone è pronta per essere votata. Come creatore, tocca a te avviare il processo di votazione.
+                    </small>
+                  </div>
+                </div>
+              )}
+
+              {/* Pulsante per finalizzare la votazione */}
+              {showExecuteProposalBtn && (
+                <div className="mt-3">
+                  <button 
+                    className="btn btn-warning w-100"
+                    onClick={() => handleExecuteProposal(readyToExecuteProposals[milestone.index], milestone.index)}
+                    disabled={isExecutingProposal}
+                  >
+                    {isExecutingProposal ? (
+                      <><span className="spinner-border spinner-border-sm me-2"></span> Finalizzazione votazione...</>
+                    ) : (
+                      <><i className="bi bi-flag-fill me-2"></i> Finalizza risultato della votazione</>
+                    )}
+                  </button>
+                  <div className="mt-2">
+                    <small className="text-muted">
+                      La votazione è terminata e il risultato è pronto per essere finalizzato. Come creatore, tocca a te eseguire questa operazione.
+                    </small>
+                  </div>
+                </div>
+              )}
+
+              {/* Segnaposto per il pannello di voto*/}
+              {milestone.inVoting && milestoneProposal && (
+                <div className="mt-4">
+                  <VotingPanel 
+                    proposal={milestoneProposal}
+                    campaignAddress={campaignAddress}
+                    milestoneIndex={milestone.index}
+                  />
+                </div>
+              )}
+
+              {milestone.inVoting && !milestoneProposal && (
+                <div className="alert alert-info mt-3">
+                  <h5><i className="bi bi-info-circle me-2"></i>Votazione in corso</h5>
+                  <p className="mb-2">
+                    La votazione per questa milestone è attiva, ma il pannello non può essere visualizzato qui.
+                  </p>
+                  <a href="/governance" className="btn btn-sm btn-primary">
+                    <i className="bi bi-arrow-right me-1"></i>Vai alla Dashboard di Governance per votare
+                  </a>
+                </div>
+              )}
+              
               {/* Mostra l'avviso di rimborso per le milestone influenzate dal rifiuto */}
               {isRefundedDueToPreviousRejection(index) && (
                 <div className="alert alert-warning mt-3">
@@ -171,87 +468,10 @@ const MilestonesList = ({ milestones, campaignAddress, isLoading }) => {
                   </div>
                 </div>
               )}
-
-              {isOwner && 
-              !milestone.approved && 
-              parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) && 
-              index > 0 && !milestones[index - 1]?.approved && (
-                <div className="text-end">
-                  <button 
-                    className="btn btn-secondary btn-sm"
-                    disabled
-                    type="button"
-                  >
-                    <i className="bi bi-lock me-1"></i> Approva milestone
-                  </button>
-                  <small className="d-block text-muted mt-1">
-                    Approva prima la milestone precedente
-                  </small>
-                </div>
-              )}
-
-              {isOwner && 
-              !milestone.approved && 
-              !milestone.rejected &&
-              parseFloat(milestone.raisedAmount) >= parseFloat(milestone.targetAmount) && 
-              (index === 0 || milestones[index - 1]?.approved) && (
-                <div className="row g-2">
-                  <div className="col-auto">
-                    <button 
-                      className="btn btn-success btn-sm"
-                      onClick={() => handleApprove(milestone.index)}
-                      type="button"
-                    >
-                      <i className="bi bi-check-circle me-1"></i> Approva
-                    </button>
-                  </div>
-                  <div className="col-auto">
-                    <button 
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleOpenRejectModal(milestone.index)}
-                      type="button"
-                    >
-                      <i className="bi bi-x-circle me-1"></i> Rifiuta
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         );
       })}
-
-      {showRejectModal && (
-        <div className="modal d-block" tabIndex="-1" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Rifiuta Milestone</h5>
-                <button type="button" className="btn-close" onClick={() => setShowRejectModal(false)}></button>
-              </div>
-              <div className="modal-body">
-                <p>Stai rifiutando questa milestone. La campagna sarà disattivata e i fondi saranno rimborsati ai donatori.</p>
-                <div className="mb-3">
-                  <label htmlFor="rejectReason" className="form-label">Motivazione del rifiuto:</label>
-                  <textarea
-                    id="rejectReason"
-                    className="form-control"
-                    rows="4"
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="Fornisci una motivazione dettagliata del rifiuto..."
-                    required
-                  ></textarea>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>Annulla</button>
-                <button type="button" className="btn btn-danger" onClick={handleReject}>Conferma Rifiuto</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

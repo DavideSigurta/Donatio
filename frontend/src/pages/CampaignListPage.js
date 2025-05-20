@@ -17,9 +17,18 @@ export function CampaignListPage() {
       const counts = { active: 0, pending: 0, inactive: 0 };
       
       campaigns.forEach(campaign => {
-        if (campaign.active) {
+        // Definisci la condizione per le campagne "in approvazione"
+        const isPending = (!campaign.active && campaign.proposalId && campaign.proposalStatus === 0 && !campaign.proposalExecuted) || 
+                         (!campaign.active && !campaign.proposalExecuted && 
+                          (!campaign.proposalId || campaign.proposalId === null));
+
+        // Considera pronte per finalizzazione come "in approvazione"
+        if (campaign.proposalStatus === 4 && !campaign.proposalExecuted) {
+          counts.pending++;
+        }
+        else if (campaign.active) {
           counts.active++;
-        } else if (campaign.isPending) {
+        } else if (isPending) {
           counts.pending++;
         } else {
           counts.inactive++;
@@ -45,13 +54,19 @@ export function CampaignListPage() {
 
   // Filtra le campagne in base al tab attivo
   const filteredCampaigns = campaigns.filter(campaign => {
+    // Definisci la condizione per le campagne "in approvazione"
+    const isPending = (!campaign.active && campaign.proposalId && campaign.proposalStatus === 0 && !campaign.proposalExecuted) || 
+                     (!campaign.active && !campaign.proposalExecuted && 
+                      (!campaign.proposalId || campaign.proposalId === null));
+
     switch (activeTab) {
       case "active":
         return campaign.active;
       case "pending":
-        return campaign.isPending;
+        // Include campagne in approvazione e pronte per finalizzazione
+        return isPending || (campaign.proposalStatus === 4 && !campaign.proposalExecuted);
       case "inactive":
-        return !campaign.active && !campaign.isPending;
+        return !campaign.active && !isPending && !(campaign.proposalStatus === 4 && !campaign.proposalExecuted);
       default:
         return true;
     }
@@ -136,8 +151,13 @@ export function CampaignListPage() {
       ) : (
         <div className="row">
           {filteredCampaigns.map((campaign) => {
-            const isPending = !campaign.active && campaign.proposalId && 
-                              campaign.proposalStatus === 0 && !campaign.proposalExecuted;
+            // Determina se una campagna è in attesa di approvazione
+            const isPending = (!campaign.active && campaign.proposalId && 
+                              campaign.proposalStatus === 0 && !campaign.proposalExecuted) || 
+                             (!campaign.active && !campaign.proposalExecuted && 
+                              (!campaign.proposalId || campaign.proposalId === null));
+            
+            const isReadyForExecution = campaign.proposalStatus === 4 && !campaign.proposalExecuted;
             
             return (
               <div key={campaign.address} className="col-md-4 mb-4">
@@ -150,9 +170,10 @@ export function CampaignListPage() {
                     raised: formatEtherValue(campaign.raisedAmount),
                     goal: formatEtherValue(campaign.goalAmount),
                     active: campaign.active,
-                    isPending: campaign.isPending,
+                    isPending: isPending,
                     proposalId: campaign.proposalId,
                     proposalStatus: campaign.proposalStatus,
+                    proposalExecuted: campaign.proposalExecuted,
                     timeRemaining: campaign.timeRemaining
                   }} 
                 />

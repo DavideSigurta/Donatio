@@ -109,7 +109,7 @@ export function Web3Provider({ children }) {
             
             // Carica il rate di scambio
             const exchangeRate = await exchangeService.getExchangeRate();
-               
+        
             // Aggiorna lo stato con i dati recuperati
             setState(prevState => ({
                 ...prevState,
@@ -580,7 +580,6 @@ export function Web3Provider({ children }) {
             }
             
             const addresses = await campaignFactoryService.getAllCampaigns();
-            console.log("Indirizzi campagne recuperati:", addresses);
             
             const campaignList = [];
             
@@ -606,11 +605,15 @@ export function Web3Provider({ children }) {
                     if (count > 0) {
                         const allProposals = await governanceService.getProposals(0, count);
                         
-                        proposalsByCampaign = {};
+                        const proposalsByCampaign = {};
                         allProposals.forEach(proposal => {
-                            proposalsByCampaign[proposal.campaignAddress.toLowerCase()] = proposal;
+                            const campaignKey = proposal.campaignAddress.toLowerCase();
+                            if (!proposalsByCampaign[campaignKey]) {
+                                proposalsByCampaign[campaignKey] = [];
+                            }
+                            proposalsByCampaign[campaignKey].push(proposal);
                         });
-                        
+
                         setCampaignProposals(proposalsByCampaign);
                     }
                 } catch (error) {
@@ -618,12 +621,14 @@ export function Web3Provider({ children }) {
                 }
             }
 
-
             const enhancedCampaigns = campaignList.map(campaign => {
                 const campaignAddress = campaign.address.toLowerCase();
-                const proposal = proposalsByCampaign[campaignAddress];
-                
+                const proposalArray = proposalsByCampaign[campaignAddress] || [];
+                // Cerca specificamente la proposta di tipo CAMPAIGN (tipo 0)
+                const proposal = proposalArray.find(p => p && p.proposalType === 0);
+                    
                 if (proposal) {
+                    const isPendingValue = Boolean(!campaign.active && proposal.status === 0 && !proposal.executed);
                     return {
                         ...campaign,
                         proposalId: proposal.id,
@@ -635,13 +640,14 @@ export function Web3Provider({ children }) {
                         negativePercentage: proposal.negativePercentage,
                         votingEndTime: proposal.endTime,
                         timeRemaining: proposal.timeRemaining,
-                        isPending: Boolean(!campaign.active && proposal.status === 0 && !proposal.executed)
+                        isPending: Boolean(!campaign.active && proposal.status === 0 && !proposal.executed),
+
                     };
                 }
                 
                 return {
                     ...campaign,
-                    isPending: Boolean(!campaign.active)  // Assume che le campagne non attive senza proposta siano in approvazione
+                    isPending: Boolean(!campaign.active),
                 };
             });
         
@@ -657,42 +663,31 @@ export function Web3Provider({ children }) {
     
     const makeDonation = async (campaignAddress, amount, message = "") => {
         try {
-            console.log(`Donazione di ${amount} DNT a ${campaignAddress}`);
-            console.log(`Messaggio: "${message}"`);
             
             // Converti l'importo in wei (18 decimali)
             const amountWei = ethers.utils.parseEther(amount.toString());
-            console.log(`Importo in wei: ${amountWei.toString()}`);
             
             // Verifica se la campagna è inizializzata, altrimenti la inizializza
             if (!campaignService.campaigns[campaignAddress]) {
-                console.log("Inizializzazione campagna...");
                 await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
             }
             
             // Prima approva il contratto della campagna a spendere i token
-            console.log("Approvazione token...");
             const approveTx = await tokenService.approve(campaignAddress, amount);
-            console.log("Token approvati, transaction hash:", approveTx.transactionHash);
             
             // Poi effettua la donazione
             const signedCampaign = campaignService.getSignedCampaign(campaignAddress);
-            console.log("Chiamata alla funzione donate con parametri:", {
-                amountWei: amountWei.toString(),
-                message: message,
-                gasLimit: 2000000
-            });
             
             const tx = await signedCampaign.donate(amountWei, message, { 
                 gasLimit: 2000000 
             });
-            console.log("Donazione inviata, transaction hash:", tx.hash);
             
             const receipt = await tx.wait();
-            console.log("Donazione confermata:", receipt);
             
             // Aggiorna le transazioni dell'utente dopo la donazione
             await loadTransactions(state.selectedAddress);
+
+            await checkAndTriggerAutomaticVoting(campaignAddress);
             
             return receipt;
         } catch (error) {
@@ -705,7 +700,6 @@ export function Web3Provider({ children }) {
         }
     };
     
-    // Dopo il metodo makeDonation (riga 527)
     // Invia una richiesta per diventare creatore autorizzato
     const submitCreatorRequest = async (description) => {
         try {
@@ -772,25 +766,24 @@ export function Web3Provider({ children }) {
 
     // Carica le milestone di una campagna
     const loadCampaignMilestones = async (campaignAddress) => {
-        if (!campaignAddress) return;
+        if (!campaignAddress) return [];
         
         setMilestonesLoading(prev => ({ ...prev, [campaignAddress]: true }));
         
         try {
             // Inizializza la campagna se necessario
             if (!campaignService.campaigns[campaignAddress]) {
-                if (!state.selectedAddress) {
-                    await campaignService.initializeCampaignReadOnly(campaignAddress, CampaignArtifact);
-                } else {
-                    await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
-                }
+                await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
             }
             
             const milestones = await campaignService.getMilestones(campaignAddress);
             setCampaignMilestones(prev => ({ ...prev, [campaignAddress]: milestones }));
+            
+            return milestones;  
         } catch (error) {
             console.error(`Errore nel caricamento delle milestone per ${campaignAddress}:`, error);
             setCampaignMilestones(prev => ({ ...prev, [campaignAddress]: [] }));
+            return [];  
         } finally {
             setMilestonesLoading(prev => ({ ...prev, [campaignAddress]: false }));
         }
@@ -798,6 +791,7 @@ export function Web3Provider({ children }) {
 
     const loadProposals = async () => {
         try {
+            console.log("[DEBUG] Inizio loadProposals");
             setProposalsLoading(true);
             
             // Inizializza in modalità sola lettura se necessario
@@ -817,15 +811,29 @@ export function Web3Provider({ children }) {
             
             // Carica tutte le proposte
             const allProposals = await governanceService.getProposals(0, count);
-            
+
             // Organizza le proposte per indirizzo della campagna per accesso rapido
             const proposalsByCampaign = {};
             allProposals.forEach(proposal => {
-                proposalsByCampaign[proposal.campaignAddress.toLowerCase()] = proposal;
+                const campaignKey = proposal.campaignAddress.toLowerCase();
+                if (!proposalsByCampaign[campaignKey]) {
+                    proposalsByCampaign[campaignKey] = [];
+                }
+                proposalsByCampaign[campaignKey].push(proposal);
             });
             
             setProposals(allProposals);
             setCampaignProposals(proposalsByCampaign);
+
+            console.log("[DEBUG] Proposte caricate:", allProposals.map(p => ({
+                id: p.id, 
+                status: p.status, 
+                executed: p.executed,
+                type: p.proposalType,
+                milestoneIndex: p.milestoneIndex
+            })));
+
+
             
             // Se l'utente è connesso, calcola il potere di voto per le proposte attive
             if (state.selectedAddress) {
@@ -953,35 +961,39 @@ export function Web3Provider({ children }) {
         }
     };
 
-    // Approva una milestone (solo admin)
-    const approveMilestone = async (campaignAddress, milestoneIndex) => {
+    // Invia un report per una milestone completata (per creatori di campagne)
+    const submitMilestoneReport = async (campaignAddress, milestoneIndex, reportText) => {
         try {
-            setState(prevState => ({ ...prevState, txBeingSent: "Approvazione milestone..." }));
+            setState(prevState => ({ ...prevState, txBeingSent: "Invio report milestone..." }));
             
-            const result = await campaignService.approveMilestone(campaignAddress, milestoneIndex);
-            
-            setState(prevState => ({ ...prevState, txBeingSent: result.transactionHash }));
-            
-            // Ricarica le milestone
-            await loadCampaignMilestones(campaignAddress);
-            
-            await loadTransactions(state.selectedAddress);
-        
-            // Se l'utente è admin, ricarica anche le transazioni globali
-            if (state.isOwner) {
-                await loadGlobalTransactions();
+            // Inizializza il MilestoneManager se necessario
+            if (!campaignService.milestoneManager) {
+                await campaignService.initializeMilestoneManager();
             }
             
-            // Aggiorna il trigger per forzare un refresh
-            setState(prevState => ({
-                ...prevState,
-                txBeingSent: null,
-                globalTxRefreshTrigger: prevState.globalTxRefreshTrigger + 1
-            }));
+            const milestoneManager = campaignService.getSignedMilestoneManager();
             
-            return result;
+            const tx = await milestoneManager.submitMilestoneReport(
+                campaignAddress, 
+                milestoneIndex, 
+                reportText,
+                { gasLimit: 2000000 }
+            );
+            
+            setState(prevState => ({ ...prevState, txBeingSent: tx.hash }));
+            
+            const receipt = await tx.wait();
+            
+            // Ricarica le milestone dopo l'invio del report
+            await loadCampaignMilestones(campaignAddress);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+
+            await checkAndTriggerAutomaticVoting(campaignAddress);
+            
+            return receipt;
         } catch (error) {
-            console.error("Errore nell'approvazione della milestone:", error);
+            console.error("Errore nell'invio del report per la milestone:", error);
             setState(prevState => ({
                 ...prevState,
                 txBeingSent: null,
@@ -991,41 +1003,216 @@ export function Web3Provider({ children }) {
         }
     };
 
-    const rejectMilestone = async (campaignAddress, milestoneIndex, reason) => {
+    // Funzione di debug per la creazione di proposte di milestone
+    const debugMilestoneProposalCreation = async (campaignAddress, milestoneIndex) => {
         try {
-            setState(prevState => ({ ...prevState, txBeingSent: "Rifiuto milestone..." }));
+            console.log("======= DEBUG MILESTONE PROPOSAL CREATION =======");
             
-            const result = await campaignService.rejectMilestone(campaignAddress, milestoneIndex, reason);
+            // Verifica account
+            const account = await web3Service.getAccount();
+            console.log("Account connesso:", account);
             
-            setState(prevState => ({ ...prevState, txBeingSent: result.transactionHash }));
-            
-            // Ricarica le milestone
-            await loadCampaignMilestones(campaignAddress);
-            
-            // Ricarica le transazioni dell'utente
-            await loadTransactions(state.selectedAddress);
-        
-            // Se l'utente è admin, ricarica anche le transazioni globali
-            if (state.isOwner) {
-                await loadGlobalTransactions();
+            // Verifica governance
+            if (!governanceService.contract) {
+                await governanceService.initialize(contractAddress.GovernanceSystem, GovernanceSystemArtifact);
             }
             
-            // Aggiorna il trigger per forzare un refresh
+            // Verifica campagna
+            if (!campaignService.campaigns[campaignAddress]) {
+                await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
+            }
+            const campaign = campaignService.campaigns[campaignAddress];
+            
+            // Verifica permessi
+            const beneficiary = await campaign.beneficiary();
+            const admin = await governanceService.contract.admin();
+            
+            console.log("Autorizzazioni:");
+            console.log("- Beneficiario:", beneficiary);
+            console.log("- Admin:", admin);
+            console.log("- Utente è beneficiario:", account.toLowerCase() === beneficiary.toLowerCase());
+            console.log("- Utente è admin:", account.toLowerCase() === admin.toLowerCase());
+            
+            // Verifica milestone
+            await campaignService.initializeMilestoneManager();
+            const mm = campaignService.milestoneManager;
+            const milestone = await mm.getMilestone(campaignAddress, milestoneIndex);
+            
+            console.log("Stato milestone:");
+            console.log("- Finanziata completamente:", milestone[3].gte(milestone[2]));
+            console.log("- Approvata:", milestone[4]);
+            
+            console.log("===================================");
+        } catch (e) {
+            console.error("DEBUG ERROR:", e);
+        }
+    };
+
+    // Crea una proposta di votazione per una milestone (per creatori di campagne)
+    const createMilestoneProposal = async (campaignAddress, milestoneIndex) => {
+        try {
+            console.log("Esecuzione debug pre-creazione proposta...");
+            await debugMilestoneProposalCreation(campaignAddress, milestoneIndex);
+            setState(prevState => ({ ...prevState, txBeingSent: "Creazione proposta milestone..." }));
+            
+            // Inizializza il contratto GovernanceSystem se necessario
+            if (!governanceService.contract) {
+                await governanceService.initialize(contractAddress.GovernanceSystem, GovernanceSystemArtifact);
+            }
+            
+            const signedContract = governanceService.getSignedContract();
+            
+            const tx = await signedContract.createMilestoneProposal(
+                campaignAddress, 
+                milestoneIndex,
+                { gasLimit: 2000000 }
+            );
+            
+            setState(prevState => ({ ...prevState, txBeingSent: tx.hash }));
+            
+            const receipt = await tx.wait();
+            
+            // Ricarica le proposte e le milestone dopo la creazione
+            await loadProposals();
+            await loadCampaignMilestones(campaignAddress);
+
+            // Aggiungi 1 secondo di timeout per assicurarsi che le proposte siano caricate
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Forza un aggiornamento della pagina per mostrare il pannello di voto
+            window.location.reload();
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore nella creazione della proposta per la milestone:", error);
             setState(prevState => ({
                 ...prevState,
                 txBeingSent: null,
-                globalTxRefreshTrigger: prevState.globalTxRefreshTrigger + 1
+                transactionError: error
             }));
-            
-            // Attendi che la blockchain processi la transazione
-            setTimeout(() => {
-                // Forza il ricaricamento della pagina per aggiornare tutti i dati
-                window.location.reload();
-            }, 2000); // Attendi 2 secondi per dare tempo alla blockchain di aggiornare lo stato
-            
-            return result;
+            throw error;
+        }
+    };
+
+    // Calcola il potere di voto specifico per le milestone (20% donatori, 15% non donatori)
+    const calculateMilestoneVotingPower = async (voter, campaignAddress, proposalId) => {
+        try {
+            // Usa direttamente la funzione dal servizio invece di chiamare il contratto
+            return await governanceService.calculateMilestoneVotingPower(voter, campaignAddress, proposalId);
         } catch (error) {
-            console.error("Errore nel rifiuto della milestone:", error);
+            console.error("Errore nel calcolo del potere di voto per la milestone:", error);
+            throw error;
+        }
+    };
+
+    /**
+     * Ritira i fondi disponibili per una campagna (milestone approvate)
+     * @param {string} campaignAddress - Indirizzo della campagna
+     * @returns {Promise<Object>} - Ricevuta della transazione
+     */
+
+    const withdrawMilestoneFunds = async (campaignAddress) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Ritiro fondi in corso..." }));
+            
+            // Inizializza la campagna se necessario
+            if (!campaignService.campaigns[campaignAddress]) {
+            await campaignService.initializeCampaign(campaignAddress, CampaignArtifact);
+            }
+            
+            // Esegue il ritiro dei fondi
+            const receipt = await campaignService.withdraw(campaignAddress);
+            
+            // Ricarica le milestone dopo il ritiro
+            await loadCampaignMilestones(campaignAddress);
+            
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore nel ritiro dei fondi:", error);
+            setState(prevState => ({
+            ...prevState,
+            txBeingSent: null,
+            transactionError: error
+            }));
+            throw error;
+        }
+    };
+
+    /**
+     * Helper per controllare e avviare automaticamente la votazione per milestone pronte
+     * @param {string} campaignAddress - Indirizzo della campagna
+     */
+    const checkAndTriggerAutomaticVoting = async (campaignAddress) => {
+        try {
+            // Carica le milestone
+            const milestones = await loadCampaignMilestones(campaignAddress);
+            
+            if (!milestones || !Array.isArray(milestones)) {
+                return;
+            }
+            
+            // Invece di creare automaticamente le proposte, aggiorna solo lo stato delle milestone
+            // per mostrare quali sono pronte per la votazione
+            for (let i = 1; i < milestones.length; i++) {
+                const milestone = milestones[i];
+                
+                // Verifica se la milestone è pronta per la votazione
+                const isReady = await campaignService.milestoneManager.isMilestoneReadyForVoting(campaignAddress, i);
+                console.log(`Milestone ${i} pronta per votazione:`, isReady);
+            }
+        } catch (error) {
+            console.error("Errore nel controllo delle milestone:", error);
+        }
+    };
+
+    const isMilestoneReadyForVoting = async (campaignAddress, milestoneIndex) => {
+        try {
+            await campaignService.initializeMilestoneManager();
+            const manager = campaignService.milestoneManager;
+            return await manager.isMilestoneReadyForVoting(campaignAddress, milestoneIndex);
+        } catch (error) {
+            console.error("Errore nella verifica dello stato della milestone:", error);
+            return false;
+        }
+    };
+
+    const executeProposal = async (proposalId) => {
+        try {
+            setState(prevState => ({ ...prevState, txBeingSent: "Esecuzione proposta..." }));
+            
+            const signedContract = governanceService.getSignedContract();
+            const tx = await signedContract.executeProposal(proposalId, { gasLimit: 2000000 });
+            
+            setState(prevState => ({ ...prevState, txBeingSent: tx.hash }));
+            
+            const receipt = await tx.wait();
+            
+            // Ricarica le proposte e le milestone
+            await loadProposals();
+            
+            // Trova la campagna associata alla proposta e ricarica le sue milestone
+            const proposal = proposals.find(p => p.id === proposalId);
+            if (proposal && proposal.campaignAddress) {
+                await loadCampaignMilestones(proposal.campaignAddress);
+            }
+            
+            // Aggiungi un piccolo delay per assicurare che i dati siano aggiornati
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Importante: ricarica le campagne per aggiornare lo stato
+            await loadCampaigns();
+            
+            // Reset dello stato txBeingSent
+            setState(prevState => ({ ...prevState, txBeingSent: null }));
+            
+            console.log("Esecuzione proposta completata con successo");
+            return receipt;
+        } catch (error) {
+            console.error("Errore nell'esecuzione della proposta:", error);
             setState(prevState => ({
                 ...prevState,
                 txBeingSent: null,
@@ -1186,8 +1373,12 @@ export function Web3Provider({ children }) {
         campaignMilestones,
         milestonesLoading,
         loadCampaignMilestones,
-        approveMilestone,
-        rejectMilestone
+        submitMilestoneReport,
+        createMilestoneProposal,
+        withdrawMilestoneFunds,
+        calculateMilestoneVotingPower,
+        isMilestoneReadyForVoting,
+        executeProposal
     };
     
     return (

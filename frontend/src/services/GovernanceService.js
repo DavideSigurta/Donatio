@@ -1,6 +1,8 @@
 import { ethers } from 'ethers';
 import web3Service from './Web3Service';
 import GovernanceSystemArtifact from '../contracts/GovernanceSystem.json';
+import CampaignArtifact from '../contracts/Campaign.json';
+import TokenArtifact from '../contracts/Token.json';
 import contractAddresses from '../contracts/contract-address.json';
 
 /**
@@ -18,7 +20,6 @@ const governanceService = {
      */
     initialize: async function(address, artifact) {
         try {
-            console.log("[DEBUG] Inizializzazione GovernanceSystem...");
             
             if (!web3Service.provider) {
                 console.log("[DEBUG] Provider non inizializzato, inizializzazione...");
@@ -29,7 +30,6 @@ const governanceService = {
             const governanceAddress = address || contractAddresses.GovernanceSystem;
             const governanceArtifact = artifact || GovernanceSystemArtifact;
             
-            console.log("[DEBUG] Indirizzo GovernanceSystem:", governanceAddress);
             
             if (!governanceAddress) {
                 console.error("[DEBUG] Indirizzo GovernanceSystem non trovato!");
@@ -43,7 +43,6 @@ const governanceService = {
                 web3Service.signer
             );
             
-            console.log("[DEBUG] GovernanceSystem inizializzato con successo");
             return this.contract;
         } catch (error) {
             console.error("[DEBUG] Errore nell'inizializzazione del GovernanceSystem:", error);
@@ -57,7 +56,6 @@ const governanceService = {
      */
     initializeReadOnly: async function() {
         try {
-            console.log("[DEBUG] Inizializzazione GovernanceSystem in modalità sola lettura...");
             
             if (!web3Service.provider) {
                 console.log("[DEBUG] Provider non inizializzato, inizializzazione in sola lettura...");
@@ -65,7 +63,6 @@ const governanceService = {
             }
             
             const governanceAddress = contractAddresses.GovernanceSystem;
-            console.log("[DEBUG] Indirizzo GovernanceSystem:", governanceAddress);
             
             if (!governanceAddress) {
                 console.error("[DEBUG] Indirizzo GovernanceSystem non trovato!");
@@ -79,7 +76,6 @@ const governanceService = {
                 web3Service.provider
             );
             
-            console.log("[DEBUG] GovernanceSystem inizializzato in sola lettura con successo");
             return this.contract;
         } catch (error) {
             console.error("[DEBUG] Errore nell'inizializzazione in sola lettura del GovernanceSystem:", error);
@@ -100,7 +96,25 @@ const governanceService = {
     },
     
     /**
-     * Ottiene tutti i dettagli di una proposta
+     * Ottiene il conteggio totale delle proposte
+     * @returns {Promise<number>} - Numero totale di proposte
+     */
+    getProposalsCount: async function() {
+        try {
+            if (!this.contract) {
+                await this.initializeReadOnly();
+            }
+            
+            const count = await this.contract.getProposalsCount();
+            return count.toNumber();
+        } catch (error) {
+            console.error("Errore nel recupero del conteggio delle proposte:", error);
+            throw error;
+        }
+    },
+
+    /**
+     * Ottiene i dettagli di una specifica proposta
      * @param {number} proposalId - ID della proposta
      * @returns {Promise<Object>} - Dettagli della proposta
      */
@@ -122,7 +136,9 @@ const governanceService = {
                 startTime,
                 endTime,
                 status,
-                executed
+                executed,
+                proposalType,     // Nuovo campo
+                milestoneIndex    // Nuovo campo
             ] = proposal;
             
             // Calcola la percentuale di voti positivi rispetto alla soglia
@@ -137,16 +153,6 @@ const governanceService = {
             const now = Math.floor(Date.now() / 1000);
             const timeRemaining = endTime.toNumber() - now;
             
-            // Determina lo stato leggibile
-            let statusText;
-            switch (status) {
-                case 0: statusText = "Attiva"; break;
-                case 1: statusText = "Approvata"; break;
-                case 2: statusText = "Rifiutata"; break;
-                case 3: statusText = "Scaduta"; break;
-                default: statusText = "Sconosciuto";
-            }
-            
             return {
                 id: proposalId,
                 campaignAddress,
@@ -157,33 +163,16 @@ const governanceService = {
                 startTime: new Date(startTime.toNumber() * 1000),
                 endTime: new Date(endTime.toNumber() * 1000),
                 status: status,
-                statusText: statusText,
                 executed,
                 positivePercentage: positivePercentage > 100 ? 100 : positivePercentage,
                 negativePercentage: negativePercentage > 100 ? 100 : negativePercentage,
                 timeRemaining: timeRemaining > 0 ? timeRemaining : 0,
-                isExpired: timeRemaining <= 0
+                isExpired: timeRemaining <= 0,
+                proposalType,     // Campo per il tipo di proposta (0=CAMPAIGN, 1=MILESTONE)
+                milestoneIndex: milestoneIndex.toNumber() // Indice della milestone (rilevante solo per proposte di tipo 1)
             };
         } catch (error) {
             console.error("Errore nel recupero della proposta:", error);
-            throw error;
-        }
-    },
-    
-    /**
-     * Ottiene il conteggio totale delle proposte
-     * @returns {Promise<number>} - Numero totale di proposte
-     */
-    getProposalsCount: async function() {
-        try {
-            if (!this.contract) {
-                await this.initializeReadOnly();
-            }
-            
-            const count = await this.contract.getProposalsCount();
-            return count.toNumber();
-        } catch (error) {
-            console.error("Errore nel recupero del conteggio delle proposte:", error);
             throw error;
         }
     },
@@ -209,16 +198,23 @@ const governanceService = {
             // Limita il numero di proposte da caricare al numero totale disponibile
             const actualCount = Math.min(loadCount, totalCount - start);
             
-            // Carica le proposte in parallelo
+            // Carica le proposte in parallelo con gestione errori migliorata
             const promises = [];
             for (let i = start; i < start + actualCount; i++) {
-                promises.push(this.getProposal(i));
+                promises.push(
+                    this.getProposal(i).catch(error => {
+                        console.warn(`Errore nel caricamento della proposta ${i}:`, error);
+                        return null; // Restituisce null invece di propagare l'errore
+                    })
+                );
             }
             
-            return await Promise.all(promises);
+            // Filtra le proposte nulle (quelle che hanno generato errori)
+            const results = await Promise.all(promises);
+            return results.filter(proposal => proposal !== null);
         } catch (error) {
             console.error("Errore nel caricamento delle proposte:", error);
-            throw error;
+            return []; // Restituisce un array vuoto invece di propagare l'errore
         }
     },
     
@@ -234,16 +230,24 @@ const governanceService = {
                 await this.initializeReadOnly();
             }
             
-            // Ottiene i dettagli della proposta per avere la quota di approvazione
-            const proposal = await this.getProposal(proposalId);
-            const approvalQuota = ethers.utils.parseEther(proposal.approvalQuota);
-            
-            // Calcola il potere di voto
-            const votingPower = await this.contract.calculateVotingPower(voter, approvalQuota);
-            return ethers.utils.formatEther(votingPower);
+            try {
+                // Verifica che la proposta esista
+                const count = await this.contract.getProposalsCount();
+                if (proposalId >= count) {
+                    console.log(`Proposta ${proposalId} non ancora disponibile (totale: ${count})`);
+                    return "0";
+                }
+                
+                // Passa correttamente l'ID della proposta, non la quota
+                const votingPower = await this.contract.calculateVotingPower(voter, proposalId);
+                return ethers.utils.formatEther(votingPower);
+            } catch (err) {
+                console.warn(`Errore nel calcolo del potere di voto per proposta ${proposalId}:`, err);
+                return "0";
+            }
         } catch (error) {
             console.error("Errore nel calcolo del potere di voto:", error);
-            throw error;
+            return "0";
         }
     },
     
@@ -268,6 +272,35 @@ const governanceService = {
             throw error;
         }
     },
+
+    /**
+     * Esegue una proposta di governance
+     * @param {number} proposalId - ID della proposta
+     * @returns {Promise<Object>} - Risultato della transazione
+     */
+    executeProposal: async function(proposalId) {
+        try {
+            if (!this.contract) {
+                await this.initialize();
+            }
+            
+            const signedContract = this.getSignedContract();
+            
+            const tx = await signedContract.executeProposal(proposalId, {
+                gasLimit: 3000000
+            });
+            
+            console.log("Esecuzione proposta inviata, hash:", tx.hash);
+            
+            const receipt = await tx.wait();
+            console.log("Esecuzione proposta confermata:", receipt);
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore durante l'esecuzione della proposta:", error);
+            throw error;
+        }
+    },
     
     /**
      * Vota su una proposta
@@ -284,13 +317,23 @@ const governanceService = {
             const signedContract = this.getSignedContract();
             
             const tx = await signedContract.vote(proposalId, support, {
-                gasLimit: 500000
+                gasLimit: 1000000
             });
             
-            console.log("Voto inviato, hash:", tx.hash);
-            
+            console.log("[DEBUG] Voto inviato, hash:", tx.hash);
             const receipt = await tx.wait();
-            console.log("Voto confermato:", receipt);
+            console.log("[DEBUG] Voto confermato, controllo logs:", receipt.logs.length);
+
+            // Controlla se c'è un evento ProposalReadyForExecution
+            for (const log of receipt.logs) {
+                try {
+                    // Prova a decodificare il log come un evento ProposalReadyForExecution
+                    const event = this.contract.interface.parseLog(log);
+                    console.log("[DEBUG] Evento trovato:", event.name, event.args);
+                } catch (e) {
+                    // Ignora errori di parsing
+                }
+            }
             
             return receipt;
         } catch (error) {
@@ -313,7 +356,7 @@ const governanceService = {
             const signedContract = this.getSignedContract();
             
             const tx = await signedContract.finalizeExpiredProposal(proposalId, {
-                gasLimit: 500000
+                gasLimit: 1000000
             });
             
             console.log("Finalizzazione inviata, hash:", tx.hash);
@@ -354,6 +397,105 @@ const governanceService = {
         } catch (error) {
             console.error("Errore durante l'aggiornamento del periodo:", error);
             throw error;
+        }
+    },
+
+    /**
+     * Crea una proposta di governance per una milestone
+     * @param {string} campaignAddress - Indirizzo della campagna
+     * @param {number} milestoneIndex - Indice della milestone
+     * @returns {Promise<Object>} - Risultato della transazione
+     */
+    createMilestoneProposal: async function(campaignAddress, milestoneIndex) {
+        try {
+            if (!this.contract) {
+                await this.initialize();
+            }
+            
+            const signedContract = this.getSignedContract();
+            
+            const tx = await signedContract.createMilestoneProposal(campaignAddress, milestoneIndex, {
+                gasLimit: 2000000
+            });
+            
+            console.log("Proposta milestone creata, hash:", tx.hash);
+            
+            const receipt = await tx.wait();
+            console.log("Proposta milestone confermata:", receipt);
+            
+            return receipt;
+        } catch (error) {
+            console.error("Errore nella creazione della proposta per la milestone:", error);
+            throw error;
+        }
+    },
+
+    /**
+     * Calcola il potere di voto di un utente per una proposta di milestone
+     * @param {string} voter - Indirizzo del votante
+     * @param {string} campaignAddress - Indirizzo della campagna
+     * @param {number} proposalId - ID della proposta
+     * @returns {Promise<string>} - Potere di voto formattato
+     */
+    calculateMilestoneVotingPower: async function(voter, campaignAddress, proposalId) {
+        try {
+            if (!this.contract) {
+                await this.initializeReadOnly();
+            }
+            
+            // Se l'utente non ha un indirizzo, non può votare
+            if (!voter) {
+                return "0";
+            }
+            
+            try {
+                // Verifica che la proposta sia valida e completamente caricata
+                const count = await this.contract.getProposalsCount();
+                
+                // Se l'ID è fuori range, restituisci 0
+                if (proposalId >= count) {
+                    console.log(`Proposta ${proposalId} non ancora disponibile (totale: ${count})`);
+                    return "0";
+                }
+                
+                // Ottieni e verifica la proposta prima di calcolare il potere di voto
+                const proposal = await this.getProposal(proposalId);
+                
+                // Controlli aggiuntivi di sicurezza
+                if (!proposal || 
+                    !proposal.campaignAddress || 
+                    proposal.campaignAddress.toLowerCase() !== campaignAddress.toLowerCase()) {
+                    return "0";
+                }
+                
+                // Verifica il saldo token dell'utente (per evitare divisioni per zero)
+                const tokenContract = new ethers.Contract(
+                    contractAddresses.Token, 
+                    TokenArtifact.abi,
+                    web3Service.provider
+                );
+                
+                const balance = await tokenContract.balanceOf(voter);
+                if (balance.isZero()) {
+                    return "0";
+                }
+                
+                try {
+                    // Se tutti i controlli passano, calcola il potere di voto
+                    const votingPower = await this.contract.calculateVotingPower(voter, proposalId);
+                    return ethers.utils.formatEther(votingPower);
+                } catch (err) {
+                    console.warn(`Errore nel calcolo del potere di voto per proposta ${proposalId}, restituisco 0:`, err);
+                    return "0";
+                }
+                
+            } catch (error) {
+                console.warn("Errore durante la validazione della proposta:", error);
+                return "0";
+            }
+        } catch (error) {
+            console.error("Errore nel calcolo del potere di voto:", error);
+            return "0";
         }
     }
 };

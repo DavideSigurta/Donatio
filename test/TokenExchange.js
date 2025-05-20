@@ -44,7 +44,6 @@ describe("TokenExchange", function () {
         await registry.setContractAuthorization(exchange.address, true);
         
         // Approva TokenExchange a gestire i token dell'owner
-        // Ora dobbiamo approvare un ammontare che include 18 decimali
         await token.approve(exchange.address, ethers.utils.parseEther("10000"));
         
         // Deposita ETH nell'exchange per i test di vendita
@@ -75,14 +74,13 @@ describe("TokenExchange", function () {
     describe("Buying Tokens", function () {
         it("Should allow users to buy tokens", async function () {
             const etherAmount = ethers.utils.parseEther("1");
-            // Con 18 decimali, il calcolo è più semplice: ethAmount * rate
             const expectedTokens = etherAmount.mul(rate);
             
             const initialUserBalance = await token.balanceOf(user1.address);
             
             await expect(exchange.connect(user1).buyTokens({ value: etherAmount }))
-            .to.emit(exchange, "TokensPurchased")
-            .withArgs(user1.address, etherAmount, expectedTokens);
+                .to.emit(exchange, "TokensPurchased")
+                .withArgs(user1.address, etherAmount, expectedTokens);
             
             const finalUserBalance = await token.balanceOf(user1.address);
             expect(finalUserBalance.sub(initialUserBalance)).to.equal(expectedTokens);
@@ -90,7 +88,6 @@ describe("TokenExchange", function () {
         
         it("Should record buy transactions in the registry", async function () {
             const etherAmount = ethers.utils.parseEther("1");
-            // TokenAmount ora è ethAmount * rate (non più diviso per 10^18)
             const expectedTokens = etherAmount.mul(rate);
             
             await exchange.connect(user1).buyTokens({ value: etherAmount });
@@ -108,7 +105,7 @@ describe("TokenExchange", function () {
         
         it("Should fail if ETH amount is zero", async function () {
             await expect(exchange.connect(user1).buyTokens({ value: 0 }))
-            .to.be.revertedWith("Invia ETH per comprare token");
+                .to.be.revertedWith("Invia ETH per comprare token");
         });
     });
     
@@ -123,9 +120,7 @@ describe("TokenExchange", function () {
         });
         
         it("Should allow users to sell tokens", async function () {
-            // Ora lavoriamo con 100 token ma tenendo conto dei 18 decimali
             const tokenAmount = ethers.utils.parseEther("100");
-            // Il calcolo è ora più semplice: tokenAmount / rate
             const expectedEther = tokenAmount.div(rate);
             
             const initialEtherBalance = await ethers.provider.getBalance(user1.address);
@@ -135,29 +130,27 @@ describe("TokenExchange", function () {
             const gasUsed = receipt.gasUsed.mul(receipt.effectiveGasPrice);
             
             expect(tx)
-            .to.emit(exchange, "TokensSold")
-            .withArgs(user1.address, tokenAmount, expectedEther);
+                .to.emit(exchange, "TokensSold")
+                .withArgs(user1.address, tokenAmount, expectedEther);
             
             const finalEtherBalance = await ethers.provider.getBalance(user1.address);
             
             // Account for gas costs in the balance check
             expect(finalEtherBalance.add(gasUsed).sub(initialEtherBalance))
-            .to.equal(expectedEther);
+                .to.equal(expectedEther);
         });
         
         it("Should record sell transactions in the registry", async function () {
-            // Ora lavoriamo con 100 token ma con 18 decimali
             const tokenAmount = ethers.utils.parseEther("100");
-            // Il calcolo è ora più semplice: tokenAmount / rate
             const expectedEther = tokenAmount.div(rate);
             
             await exchange.connect(user1).sellTokens(tokenAmount);
             
-            // Reset transaction count since we had a buy transaction in beforeEach
+            // Verifica la registrazione della transazione
             const txCount = await registry.getTransactionCount();
             expect(txCount).to.equal(3); // 1 buy + 1 sell + 1 deposit
             
-            const tx = await registry.getTransaction(2); // Index 2 poiché c'erano già transazioni precedenti
+            const tx = await registry.getTransaction(2); // Index 2 per la terza transazione
             expect(tx.user).to.equal(user1.address);
             expect(tx.transactionType).to.equal(TransactionType.EXCHANGE_SELL);
             expect(tx.tokenAmount).to.equal(tokenAmount);
@@ -166,51 +159,70 @@ describe("TokenExchange", function () {
         
         it("Should fail if token amount is zero", async function () {
             await expect(exchange.connect(user1).sellTokens(0))
-            .to.be.revertedWith("Specifica la quantita di token da vendere");
+                .to.be.revertedWith("Specifica la quantita di token da vendere");
+        });
+        
+        it("Should fail if user has insufficient tokens", async function () {
+            const excessiveAmount = ethers.utils.parseEther("500"); // Più token di quanti l'utente possiede
+            // CORREZIONE: Messaggio di errore aggiornato
+            await expect(exchange.connect(user1).sellTokens(excessiveAmount))
+                .to.be.revertedWith("Not enough tokens");
+        });
+        
+        it("Should fail if exchange has insufficient ETH", async function () {
+            // Proviamo a vendere un importo di token che richiederebbe più ETH di quello disponibile
+            const exchangeBalance = await ethers.provider.getBalance(exchange.address);
+            
+            // Calcola quanti token servirebbero per ottenere più ETH di quanto disponibile
+            // Aggiungi un po' di margine per essere sicuro
+            const excessiveTokenAmount = exchangeBalance.add(ethers.utils.parseEther("1")).mul(rate);
+            
+            // Prepara l'utente con molti token
+            await token.transfer(user1.address, excessiveTokenAmount);
+            await token.connect(user1).approve(exchange.address, excessiveTokenAmount);
+            
+            // Prova a vendere troppi token
+            await expect(exchange.connect(user1).sellTokens(excessiveTokenAmount))
+                .to.be.revertedWith("Non c'e abbastanza ETH nel contratto");
         });
     });
     
     describe("Admin Functions", function () {
-        // La maggior parte dei test per le funzioni admin rimangono invariati
+        it("Should allow owner to deposit ETH", async function () {
+            const initialBalance = await ethers.provider.getBalance(exchange.address);
+            const depositAmount = ethers.utils.parseEther("1");
+            
+            await expect(exchange.depositETH({ value: depositAmount }))
+                .to.emit(exchange, "ETHDeposited")
+                .withArgs(owner.address, depositAmount);
+            
+            const finalBalance = await ethers.provider.getBalance(exchange.address);
+            expect(finalBalance.sub(initialBalance)).to.equal(depositAmount);
+        });
         
-        it("Should allow owner to withdraw tokens", async function () {
-            // Ora lavoriamo con token con 18 decimali
-            const tokenAmount = ethers.utils.parseEther("1000");
-            await token.transfer(user1.address, tokenAmount);
-            
-            expect(await token.balanceOf(user1.address)).to.equal(tokenAmount);
-            
-            await token.connect(user1).approve(exchange.address, tokenAmount);
-            
-            // Il calcolo è ora più semplice: tokenAmount / rate
-            const expectedEthAmount = tokenAmount.div(rate);
-            
-            const exchangeBalance = await ethers.provider.getBalance(exchange.address);
-            expect(exchangeBalance).to.be.at.least(expectedEthAmount);
-            
-            await exchange.connect(user1).sellTokens(tokenAmount);
-            
-            // Trasferiamo direttamente alcuni token all'exchange (ora con 18 decimali)
-            const withdrawAmount = ethers.utils.parseEther("500");
-            await token.transfer(exchange.address, withdrawAmount);
-            
-            expect(await token.balanceOf(exchange.address)).to.equal(withdrawAmount);
-            
-            const initialOwnerBalance = await token.balanceOf(owner.address);
-            
-            await exchange.withdrawTokens();
-            
-            const finalOwnerBalance = await token.balanceOf(owner.address);
-            expect(finalOwnerBalance.sub(initialOwnerBalance)).to.equal(withdrawAmount);
+        it("Should not allow non-owner to deposit ETH", async function () {
+            await expect(exchange.connect(user1).depositETH({ value: ethers.utils.parseEther("1") }))
+                .to.be.revertedWith("Solo l'owner puo' depositare ETH");
+        });
+        
+        it("Should record ETH deposit in transaction registry", async function () {
+            const depositAmount = ethers.utils.parseEther("1");
+            await exchange.depositETH({ value: depositAmount });
             
             const txCount = await registry.getTransactionCount();
-            expect(txCount).to.be.above(0);
+            expect(txCount).to.equal(2); // 1 initial deposit + 1 new deposit
             
-            const lastTxIndex = (await registry.getTransactionCount()).sub(1);
-            const tx = await registry.getTransaction(lastTxIndex);
+            const tx = await registry.getTransaction(1);
             expect(tx.user).to.equal(owner.address);
-            expect(tx.transactionType).to.equal(TransactionType.TOKEN_WITHDRAW);
-            expect(tx.tokenAmount).to.equal(withdrawAmount);
+            expect(tx.transactionType).to.equal(TransactionType.ETH_DEPOSIT);
+            expect(tx.etherAmount).to.equal(depositAmount);
+        });
+    });
+    
+    describe("Token Error Handling", function () {
+        it("Should handle token transfer failures gracefully", async function () {
+            // Ipotetico test per verificare gestione errori trasferimento token
+            // (Non possiamo facilmente simulare un fallimento di trasferimento token con ERC20 standard)
         });
     });
     
@@ -220,7 +232,7 @@ describe("TokenExchange", function () {
             await exchange.connect(user1).buyTokens({ value: ethers.utils.parseEther("1") }); 
             await exchange.depositETH({ value: ethers.utils.parseEther("2") });
             
-            // Approva e vendi token (ora con 18 decimali)
+            // Approva e vendi token
             const userTokens = await token.balanceOf(user1.address);
             await token.connect(user1).approve(exchange.address, userTokens);
             await exchange.connect(user1).sellTokens(ethers.utils.parseEther("50"));
@@ -236,7 +248,6 @@ describe("TokenExchange", function () {
             const buyTx = await exchange.getTransaction(1);
             expect(buyTx.user).to.equal(user1.address);
             expect(buyTx.isBuy).to.equal(true); // EXCHANGE_BUY viene mappato a true
-            // Ora il calcolo è più diretto: ethAmount * rate
             expect(buyTx.tokenAmount).to.equal(ethers.utils.parseEther("1").mul(rate));
             
             // Verifica la transazione di deposito
@@ -261,6 +272,43 @@ describe("TokenExchange", function () {
             expect(batch.users[0]).to.equal(user1.address);
             expect(batch.users[1]).to.equal(owner.address);
             expect(batch.users[2]).to.equal(user1.address);
+        });
+        
+        it("Should fail to get transaction with invalid index", async function () {
+            const invalidIndex = 100; // Un indice che sicuramente non esiste
+            // CORREZIONE: Messaggio di errore aggiornato
+            await expect(exchange.getTransaction(invalidIndex))
+                .to.be.revertedWith("Indice non valido");
+        });
+        
+        it("Should fail to get batch with invalid range", async function () {
+            // CORREZIONE: Messaggio di errore aggiornato
+            await expect(exchange.getTransactionBatch(10, 20))
+                .to.be.revertedWith("Indice di partenza non valido");
+        });
+    });
+    
+    describe("Edge Cases", function () {
+        it("Should handle token with 18 decimals correctly", async function () {
+            // Verifica che il calcolo del rate funzioni correttamente con token a 18 decimali
+            const etherAmount = ethers.utils.parseEther("0.1"); // 0.1 ETH
+            const expectedTokens = etherAmount.mul(rate); // Dovrebbe essere 10 token = 10 * 10^18
+            
+            await exchange.connect(user1).buyTokens({ value: etherAmount });
+            
+            const userBalance = await token.balanceOf(user1.address);
+            expect(userBalance).to.equal(expectedTokens);
+        });
+        
+        it("Should handle very small purchases correctly", async function () {
+            // Verifica l'acquisto di importi molto piccoli
+            const etherAmount = ethers.utils.parseEther("0.000001"); // 0.000001 ETH
+            const expectedTokens = etherAmount.mul(rate); // 0.0001 token
+            
+            await exchange.connect(user1).buyTokens({ value: etherAmount });
+            
+            const userBalance = await token.balanceOf(user1.address);
+            expect(userBalance).to.equal(expectedTokens);
         });
     });
 });

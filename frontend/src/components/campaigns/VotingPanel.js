@@ -2,8 +2,18 @@ import React, { useState, useEffect, useRef } from "react";
 import { useWeb3 } from "../../contexts/Web3Context";
 import { formatDistanceToNow } from 'date-fns';
 import { it } from 'date-fns/locale';
+import campaignService from '../../services/CampaignService'; // Aggiungi questa riga
 
-export function VotingPanel({ proposal, campaignAddress }) {
+/**
+ * Componente che gestisce il pannello di votazione per le campagne e le milestone
+ * 
+ * @param {Object} props
+ * @param {Object} props.proposal - Dati della proposta di votazione
+ * @param {String} props.campaignAddress - Indirizzo della campagna
+ * @param {Number} props.milestoneIndex - Indice della milestone (solo per proposte di tipo milestone)
+ * @returns {JSX.Element} Componente React
+ */
+export function VotingPanel({ proposal, campaignAddress, milestoneIndex }) {
     // Stati del componente
     const [currentProposal, setCurrentProposal] = useState(null);
     const [isVoting, setIsVoting] = useState(false);
@@ -13,6 +23,9 @@ export function VotingPanel({ proposal, campaignAddress }) {
     const [votingPower, setVotingPower] = useState('0');
     const [isExpired, setIsExpired] = useState(false);
     const [countdown, setCountdown] = useState('');
+    const [isDonator, setIsDonator] = useState(false);
+    const [isCreatorOfCampaign, setIsCreatorOfCampaign] = useState(false);
+
     
     // Ref per tracciare l'ultimo indirizzo e l'endTime
     const lastAddressRef = useRef(null);
@@ -30,8 +43,12 @@ export function VotingPanel({ proposal, campaignAddress }) {
         hasVoted, 
         finalizeProposal,
         userVotingPower,
-        loadProposals 
+        loadProposals, 
+        calculateMilestoneVotingPower
     } = useWeb3();
+
+    // Determina se questa proposta è per una milestone
+    const isMilestoneProposal = proposal && proposal.proposalType === 1; // 0 = CAMPAIGN, 1 = MILESTONE
     
     // Funzione di utilità per formattare il tempo rimanente
     const formatTimeRemaining = (seconds) => {
@@ -88,6 +105,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
             if (!currentProposal || !selectedAddress) {
                 setUserHasVoted(false);
                 setVotingPower('0');
+                setIsDonator(false);
                 return;
             }
             
@@ -96,6 +114,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
                 console.log("Indirizzo cambiato, reset immediato dei valori");
                 setUserHasVoted(false);
                 setVotingPower('0');
+                setIsDonator(false);
                 // Piccolo ritardo prima di caricare i nuovi valori
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
@@ -110,13 +129,47 @@ export function VotingPanel({ proposal, campaignAddress }) {
                     setVotingPower('0');
                 }
                 
-                // Ottieni il potere di voto solo se c'è un potere specifico per questo utente e questa proposta
-                if (userVotingPower && 
-                    userVotingPower[currentProposal.id] && 
-                    parseFloat(userVotingPower[currentProposal.id]) > 0) {
-                    setVotingPower(userVotingPower[currentProposal.id]);
+                // Ottieni il potere di voto in base al tipo di proposta
+                if (isMilestoneProposal && campaignAddress) {
+                    // Per le milestone, usiamo la funzione specifica con il peso differenziato
+                    const power = await calculateMilestoneVotingPower(
+                        selectedAddress,
+                        campaignAddress, 
+                        currentProposal.id
+                    );
+                    setVotingPower(power);
+                    
+                    // Verifica se l'utente è un donatore per questa campagna
+                    try {
+                        // Ottieni la lista delle donazioni per la campagna
+                        const campaign = await campaignService.initializeCampaign(campaignAddress);
+                        const donationsCount = await campaign.getDonationsCount();
+                        
+                        // Controlla se l'utente è tra i donatori
+                        let userIsDonator = false;
+                        for (let i = 0; i < donationsCount; i++) {
+                            const donation = await campaign.donations(i);
+                            if (donation.donor.toLowerCase() === selectedAddress.toLowerCase()) {
+                                userIsDonator = true;
+                                break;
+                            }
+                        }
+                        
+                        setIsDonator(userIsDonator);
+                        console.log(`Utente ${selectedAddress} è donatore: ${userIsDonator}`);
+                    } catch (error) {
+                        console.error("Errore nel verificare lo stato di donatore:", error);
+                        setIsDonator(false);
+                    }
                 } else {
-                    setVotingPower('0');
+                    // Per le campagne, usiamo il potere di voto standard
+                    if (userVotingPower && 
+                        userVotingPower[currentProposal.id] && 
+                        parseFloat(userVotingPower[currentProposal.id]) > 0) {
+                        setVotingPower(userVotingPower[currentProposal.id]);
+                    } else {
+                        setVotingPower('0');
+                    }
                 }
             } catch (error) {
                 console.error("Errore nel caricamento dello stato di voto:", error);
@@ -124,7 +177,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
         };
         
         checkVotingStatus();
-    }, [currentProposal, selectedAddress, userVotingPower, hasVoted]);
+    }, [currentProposal, selectedAddress, userVotingPower, hasVoted, calculateMilestoneVotingPower, campaignAddress, isMilestoneProposal]);
     
     // Gestisce il countdown usando l'endTime memorizzato
     useEffect(() => {
@@ -135,7 +188,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
         }
         
         // Funzione per aggiornare il countdown basato sul tempo rimanente reale
-        const updateCountdown = () => {
+        const updateCountdown = (intervalId = null) => {
             const now = Date.now();
             const remaining = Math.max(0, Math.floor((endTimeRef.current - now) / 1000));
             
@@ -143,18 +196,41 @@ export function VotingPanel({ proposal, campaignAddress }) {
             
             if (remaining <= 0) {
                 setIsExpired(true);
-                clearInterval(timerInterval);
+                if (intervalId !== null) {
+                    clearInterval(intervalId);
+                }
                 loadProposals(); // Ricarica le proposte quando il timer scade
             }
         };
-        
-        // Aggiorna subito e poi ogni secondo
+
+        // Prima chiamata senza l'ID dell'intervallo
         updateCountdown();
-        const timerInterval = setInterval(updateCountdown, 1000);
+
+        // Crea l'intervallo e passa l'ID come parametro alla funzione
+        const timerInterval = setInterval(() => {
+            updateCountdown(timerInterval);
+        }, 1000);
         
         // Pulizia dell'intervallo quando il componente viene smontato
         return () => clearInterval(timerInterval);
     }, [currentProposal?.id, loadProposals]); // Dipende solo dall'ID della proposta, non dal timeRemaining
+
+    // Verifica se l'utente è il creatore della campagna
+    useEffect(() => {
+        const checkIfCreator = async () => {
+            if (!selectedAddress || !campaignAddress) return;
+            
+            try {
+                const campaign = await campaignService.initializeCampaign(campaignAddress);
+                const creator = await campaign.creator();
+                setIsCreatorOfCampaign(creator.toLowerCase() === selectedAddress.toLowerCase());
+            } catch (error) {
+                console.error("Errore nel verificare il creatore:", error);
+            }
+        };
+        
+        checkIfCreator();
+    }, [selectedAddress, campaignAddress]);
     
     // Gestisce il voto favorevole
     const handleApprove = async () => {
@@ -186,6 +262,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
         
         try {
             setIsVoting(true);
+            console.log("[DEBUG] Invio voto con supporto:", support);
             await voteOnProposal(currentProposal.id, support);
             setUserHasVoted(true);
             setTransactionCompleted(true);
@@ -203,12 +280,28 @@ export function VotingPanel({ proposal, campaignAddress }) {
             const approvalThreshold = parseFloat(currentProposal.approvalQuota) / 2;
             const rejectionThreshold = parseFloat(currentProposal.approvalQuota) * 0.3;
             
+            console.log("[DEBUG] Stato dopo voto:", {
+            proposta: currentProposal.id,
+            positiveVotes: newPositiveVotes,
+            negativeVotes: newNegativeVotes,
+            approvalThreshold,
+            rejectionThreshold,
+            sogliaSuperata: newPositiveVotes >= approvalThreshold || newNegativeVotes >= rejectionThreshold,
+            statoAttuale: currentProposal.status
+            });
+            
             // Se questo voto ha raggiunto una soglia critica, ricarica la pagina
             if (newPositiveVotes >= approvalThreshold || newNegativeVotes >= rejectionThreshold) {
                 // Attendi che la blockchain aggiorni lo stato
                 setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
+                    // Prima carica nuovamente le proposte per aggiornare lo stato in memoria
+                    loadProposals().then(() => {
+                        // Poi attendi un altro breve periodo prima di ricaricare completamente
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 2000);
+                    });
+                }, 5000);  // Aumenta il tempo di attesa da 2000 a 5000 ms
             }
             
         } catch (error) {
@@ -248,7 +341,9 @@ export function VotingPanel({ proposal, campaignAddress }) {
         <div className="voting-panel">
         <div className="card mb-4">
         <div className="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
-        <h3 className="card-title mb-0">Votazione per Approvazione Campagna</h3>
+        <h3 className="card-title mb-0">
+            Votazione per Approvazione {isMilestoneProposal ? 'Milestone' : 'Campagna'}
+        </h3>
         <span className="badge bg-info text-white">
         {isExpired ? "Votazione scaduta" : "Votazione in corso"}
         </span>
@@ -310,12 +405,47 @@ export function VotingPanel({ proposal, campaignAddress }) {
         
         {/* Dettagli proposta */}
         <div className="mt-3">
-        <p><strong>Target raccolta:</strong> {currentProposal.targetAmount} DNT</p>
-        <p><strong>Quota approvazione:</strong> {currentProposal.approvalQuota} DNT</p>
-        <small className="text-muted">
-        <i className="bi bi-arrow-clockwise me-1"></i>
-        Dati aggiornati automaticamente ogni {refreshInterval/1000} secondi
-        </small>
+            {isMilestoneProposal ? (
+                <p><strong>Indice milestone:</strong> {milestoneIndex !== undefined ? milestoneIndex + 1 : "N/A"}</p>
+            ) : (
+                <p><strong>Target raccolta:</strong> {currentProposal.targetAmount} DNT</p>
+            )}
+            <p><strong>Quota approvazione:</strong> {currentProposal.approvalQuota} DNT</p>
+
+            {/* Mostra messaggio quando la proposta è pronta per l'esecuzione ma non eseguita */}
+            {currentProposal.status === 4 && !currentProposal.executed && (
+                <div className="alert alert-warning mt-3">
+                    <h5><i className="bi bi-exclamation-triangle me-2"></i>Votazione conclusa</h5>
+                    <p>
+                        La votazione ha raggiunto la soglia richiesta 
+                        {currentProposal.positiveVotes >= currentProposal.approvalQuota / 2 ? " per l'approvazione" : " per il rifiuto"}. 
+                        Il risultato è pronto per essere finalizzato dal creatore della campagna.
+                    </p>
+                    {isCreatorOfCampaign && (
+                        <div className="mt-2">
+                            <small>
+                                In quanto creatore della campagna, puoi finalizzare questa votazione dalla pagina della campagna.
+                            </small>
+                        </div>
+                    )}
+                </div>
+            )}
+            
+            {/* Informazioni sul peso differenziato per le milestone */}
+            {isMilestoneProposal && (
+                <div className="alert alert-info mt-2 mb-3">
+                    <i className="bi bi-info-circle me-2"></i>
+                    <small>
+                        I donatori hanno un peso di voto pari al <strong>20%</strong> dei loro token, 
+                        mentre i non donatori hanno un peso del <strong>15%</strong>.
+                    </small>
+                </div>
+            )}
+            
+            <small className="text-muted">
+                <i className="bi bi-arrow-clockwise me-1"></i>
+                Dati aggiornati automaticamente ogni {refreshInterval/1000} secondi
+            </small>
         </div>
         </div>
         
@@ -332,7 +462,12 @@ export function VotingPanel({ proposal, campaignAddress }) {
             <h5>Il tuo voto:</h5>
             <p>
             <strong>Il tuo potere di voto:</strong> {votingPower} DNT 
-            <small className="text-muted ml-2">(basato sui tuoi token e limitato al 20% della quota)</small>
+            <small className="text-muted ml-2">
+                {isMilestoneProposal 
+                    ? `(${isDonator ? "20% del peso come donatore" : "15% del peso come non-donatore"})`
+                    : "(basato sui tuoi token e limitato al 20% della quota)"
+                }
+            </small>
             </p>
             <div className="d-flex mt-3">
             <button 
@@ -345,7 +480,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
                 <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                 Invio in corso...
                 </span> : 
-                "Approva campagna"
+                `Approva ${isMilestoneProposal ? 'milestone' : 'campagna'}`
             }
             </button>
             <div className="mx-2"></div>
@@ -359,7 +494,7 @@ export function VotingPanel({ proposal, campaignAddress }) {
                 <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                 Invio in corso...
                 </span> : 
-                "Rifiuta campagna"
+                `Rifiuta ${isMilestoneProposal ? 'milestone' : 'campagna'}`
             }
             </button>
             </div>

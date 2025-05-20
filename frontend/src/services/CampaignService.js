@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import web3Service from './Web3Service';
 import tokenService from './TokenService';
 import MilestoneManagerArtifact from '../contracts/MilestoneManager.json';
+import GovernanceSystemArtifact from '../contracts/GovernanceSystem.json';
 import contractAddresses from '../contracts/contract-address.json';
 import campaignFactoryService from './CampaignFactoryService';
 
@@ -20,17 +21,17 @@ const campaignService = {
      */
     initializeMilestoneManager: async function() {
         try {
-            console.log("[DEBUG] Inizializzazione MilestoneManager...");
+            //console.log("[DEBUG] Inizializzazione MilestoneManager...");
             if (!web3Service.provider) {
-                console.log("[DEBUG] Provider non inizializzato, inizializzazione...");
+                //console.log("[DEBUG] Provider non inizializzato, inizializzazione...");
                 await web3Service.initialize();
             }
             
             if (!this.milestoneManager) {
-                console.log("[DEBUG] MilestoneManager non inizializzato, creazione istanza...");
+                //console.log("[DEBUG] MilestoneManager non inizializzato, creazione istanza...");
                 // Usa contractAddresses invece di CONTRACT_ADDRESSES
                 const mmAddress = contractAddresses.MilestoneManager;
-                console.log("[DEBUG] Indirizzo MilestoneManager:", mmAddress);
+                //console.log("[DEBUG] Indirizzo MilestoneManager:", mmAddress);
                 
                 if (!mmAddress) {
                     console.error("[DEBUG] Indirizzo MilestoneManager non trovato!");
@@ -43,7 +44,7 @@ const campaignService = {
                     MilestoneManagerArtifact.abi,
                     web3Service.signer
                 );
-                console.log("[DEBUG] MilestoneManager inizializzato con successo");
+                //console.log("[DEBUG] MilestoneManager inizializzato con successo");
             }
             
             return this.milestoneManager;
@@ -254,14 +255,14 @@ const campaignService = {
      */
     donate: async function(campaignAddress, amount, message = "") {
         try {
-            console.log(`Donazione di ${amount} DNT a ${campaignAddress}`);
+            //console.log(`Donazione di ${amount} DNT a ${campaignAddress}`);
             
             // Converti l'importo in wei (18 decimali)
             const amountWei = ethers.utils.parseEther(amount.toString());
             
             // Prima approva il contratto della campagna a spendere i token
             const approveTx = await tokenService.approve(campaignAddress, amount);
-            console.log("Token approvati, transaction hash:", approveTx.transactionHash);
+            //console.log("Token approvati, transaction hash:", approveTx.transactionHash);
             
             // Poi effettua la donazione
             const signedCampaign = this.getSignedCampaign(campaignAddress);
@@ -270,10 +271,10 @@ const campaignService = {
                 throw new Error("Non puoi donare a una campagna inattiva");
             }
             const tx = await signedCampaign.donate(amountWei, message, { gasLimit: 2000000 });
-            console.log("Donazione inviata, transaction hash:", tx.hash);
+            //console.log("Donazione inviata, transaction hash:", tx.hash);
             
             const receipt = await tx.wait();
-            console.log("Donazione confermata:", receipt);
+            //console.log("Donazione confermata:", receipt);
             
             return receipt;
         } catch (error) {
@@ -329,15 +330,15 @@ const campaignService = {
     withdraw: async function(campaignAddress) {
         try {
             const signedCampaign = this.getSignedCampaign(campaignAddress);
-            const tx = await signedCampaign.withdraw({ gasLimit: 200000 });
-            return await tx.wait();
+            const tx = await signedCampaign.withdraw({ gasLimit: 1000000 });
+            const receipt = await tx.wait();
+            return receipt;
         } catch (error) {
-            console.error("Errore nel prelievo dei fondi:", error);
+            console.error("Errore nel ritiro dei fondi:", error);
             throw error;
         }
     },
 
-    // Aggiungere questi metodi dopo il metodo withdraw
 
     /**
      * Ottiene tutte le milestone di una campagna
@@ -346,24 +347,55 @@ const campaignService = {
      */
     getMilestones: async function(campaignAddress) {
         try {
-            console.log(`[DEBUG] Inizializzazione MilestoneManager per ${campaignAddress}...`);
             await this.initializeMilestoneManager();
             
             if (!this.milestoneManager) {
-                console.warn("[DEBUG] MilestoneManager non inizializzato correttamente!");
-                return []; // Ritorna un array vuoto invece di fallire
+                console.warn("MilestoneManager non inizializzato correttamente!");
+                return []; 
             }
+
+            const campaign = this.campaigns[campaignAddress];
+            const campaignBeneficiary = await campaign.beneficiary();
             
-            console.log("[DEBUG] Recupero numero milestone...");
             const milestonesCount = await this.milestoneManager.getMilestonesCount(campaignAddress);
-            console.log(`[DEBUG] Numero milestone trovate: ${milestonesCount.toString()}`);
             
             const milestones = [];
             
+            // Ottieni prima le proposte per questa campagna 
+            // per determinare se le milestone sono in votazione
+            const governanceAddress = await campaign.governanceSystem();
+            const governanceSystem = new ethers.Contract(
+                governanceAddress,
+                GovernanceSystemArtifact.abi,
+                web3Service.provider
+            );
+            
+            // Ottieni il numero di proposte e tutte le proposte
+            const proposalsCount = await governanceSystem.getProposalsCount();
+            const milestoneProposals = [];
+            
+            // Troviamo le proposte di tipo MILESTONE per questa campagna
+            for (let i = 0; i < proposalsCount.toNumber(); i++) {
+                try {
+                    const proposal = await governanceSystem.getProposal(i);
+                    if (
+                        proposal.campaignAddress.toLowerCase() === campaignAddress.toLowerCase() && 
+                        proposal.proposalType === 1 &&  // 1 = MILESTONE type
+                        proposal.status === 0 &&        // 0 = ACTIVE
+                        !proposal.executed
+                    ) {
+                        milestoneProposals.push({
+                            id: i,
+                            milestoneIndex: proposal.milestoneIndex.toNumber()
+                        });
+                    }
+                } catch (error) {
+                    console.log(`Errore nel recupero della proposta ${i}:`, error);
+                }
+            }
+            
             for (let i = 0; i < milestonesCount.toNumber(); i++) {
-                console.log(`[DEBUG] Recupero milestone ${i}...`);
                 const milestone = await this.milestoneManager.getMilestone(campaignAddress, i);
-                console.log(`[DEBUG] Milestone ${i} recuperata:`, milestone);
                 
                 // Verifica se la milestone è stata rifiutata
                 const isRejected = await this.milestoneManager.isMilestoneRejected(campaignAddress, i);
@@ -374,9 +406,24 @@ const campaignService = {
                     try {
                         rejectionReason = await this.milestoneManager.getRejectionReason(campaignAddress, i);
                     } catch (error) {
-                        console.error(`[DEBUG] Errore nel recupero della motivazione del rifiuto per milestone ${i}:`, error);
+                        console.error(`Errore nel recupero della motivazione del rifiuto per milestone ${i}:`, error);
                     }
                 }
+
+                // Recupera il report della milestone
+                let report = '';
+                let hasReport = false;
+                try {
+                    report = await this.milestoneManager.getMilestoneReport(campaignAddress, i);
+                    hasReport = report && report.length > 0;
+                } catch (error) {
+                    console.log(`Nessun report trovato per milestone ${i}`);
+                }
+                
+                // Verifica se questa milestone è in votazione
+                const inVoting = milestoneProposals.some(p => 
+                    p.milestoneIndex.toString() === i.toString()
+                );
                 
                 milestones.push({
                     index: i,
@@ -386,36 +433,19 @@ const campaignService = {
                     raisedAmount: ethers.utils.formatEther(milestone.raisedAmount),
                     approved: milestone.approved,
                     fundsReleased: milestone.fundsReleased,
-                    rejected: isRejected,              // Aggiungi questa proprietà
-                    rejectionReason: rejectionReason   // Aggiungi questa proprietà
+                    rejected: isRejected,              
+                    rejectionReason: rejectionReason,
+                    campaignBeneficiary: campaignBeneficiary,
+                    hasReport: hasReport,
+                    report: report,
+                    inVoting: inVoting
                 });
             }
             
-            console.log(`[DEBUG] Milestone recuperate con successo: ${milestones.length}`);
             return milestones;
         } catch (error) {
-            console.error("[DEBUG] Errore dettagliato nel recupero delle milestone:", error);
+            console.error("Errore dettagliato nel recupero delle milestone:", error);
             return [];
-        }
-    },
-
-    
-
-    /**
-     * Approva una milestone (solo admin)
-     * @param {string} campaignAddress - Indirizzo della campagna
-     * @param {number} milestoneIndex - Indice della milestone da approvare
-     * @returns {Promise<Object>} - Risultato della transazione
-     */
-    approveMilestone: async function(campaignAddress, milestoneIndex) {
-        try {
-            // Usa il campaignFactoryService.getSignedContract() invece di web3Service.getCampaignFactory()
-            const campaignFactory = campaignFactoryService.getSignedContract();
-            const tx = await campaignFactory.approveMilestone(campaignAddress, milestoneIndex, { gasLimit: 1000000 });
-            return await tx.wait();
-        } catch (error) {
-            console.error("Errore nell'approvazione della milestone:", error);
-            throw error;
         }
     },
 
@@ -462,29 +492,6 @@ const campaignService = {
             throw error;
         }
     },
-
-    /**
-     * Rifiuta una milestone (solo admin)
-     * @param {string} campaignAddress - Indirizzo della campagna
-     * @param {number} milestoneIndex - Indice della milestone da rifiutare
-     * @param {string} reason - Motivazione del rifiuto
-     * @returns {Promise<Object>} - Risultato della transazione
-     */
-    rejectMilestone: async function(campaignAddress, milestoneIndex, reason) {
-        try {
-            const campaignFactory = campaignFactoryService.getSignedContract();
-            const tx = await campaignFactory.rejectMilestone(
-                campaignAddress, 
-                milestoneIndex, 
-                reason,
-                { gasLimit: 2000000 }
-            );
-            return await tx.wait();
-        } catch (error) {
-            console.error("Errore nel rifiuto della milestone:", error);
-            throw error;
-        }
-    }
 };
 
 export default campaignService;
