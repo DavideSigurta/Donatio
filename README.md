@@ -99,7 +99,7 @@ Users can create fundraising campaigns by specifying:
 ### Donations
 
 Users can:
-- Donate ETH or DNT tokens to existing campaigns
+- Donate DNT tokens to existing campaigns
 - Track the status of their donations
 - Vote for fund release when milestones are reached
 
