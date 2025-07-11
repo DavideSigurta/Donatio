@@ -1,39 +1,52 @@
-# Hardhat Boilerplate
+# Donatio: Decentralized Fundraising Platform
 
-This repository contains a sample project that you can use as the starting point
-for your Ethereum project. It's also a great fit for learning the basics of
-smart contract development.
+Donatio is a decentralized fundraising platform built on Ethereum blockchain that implements a transparent and traceable donation system. The project uses smart contracts to manage campaigns, donations, and milestones, offering a fully decentralized alternative to traditional crowdfunding platforms.
 
-This project is intended to be used with the
-[Hardhat Beginners Tutorial](https://hardhat.org/tutorial), but you should be
-able to follow it by yourself by reading the README and exploring its
-`contracts`, `tests`, `scripts` and `frontend` directories.
+## Key Features
 
-## Quick start
+- **Smart Contract System**: Complete set of contracts to manage campaigns, donations, and milestones
+- **Custom Token**: Implementation of an ERC20 token (DNT) for donations
+- **Milestone System**: Progressive release of funds based on verifiable objectives
+- **Decentralized Governance**: Voting system for campaign and milestone approvals
+- **IPFS Integration**: Using Pinata for decentralized storage of images and metadata
 
-The first things you need to do are cloning this repository and installing its
-dependencies:
+## Prerequisites
+
+- [Node.js](https://nodejs.org/) (v14.x or higher)
+- [npm](https://www.npmjs.com/) (v6.x or higher)
+- [MetaMask](https://metamask.io/) or other Ethereum wallet
+- [Pinata](https://www.pinata.cloud/) account for IPFS storage
+
+## Quick Start
+
+1. Clone the repository:
 
 ```sh
-git clone https://github.com/NomicFoundation/hardhat-boilerplate.git
-cd hardhat-boilerplate
+git clone https://github.com/DavideSigurta/Donatio.git
+cd Donatio
+```
+
+2. Install project dependencies:
+
+```sh
 npm install
 ```
 
-Once installed, let's run Hardhat's testing network:
+3. Start a local blockchain with Hardhat:
 
 ```sh
 npx hardhat node
 ```
 
-Then, on a new terminal, go to the repository's root folder and run this to
-deploy your contract:
+4. In a new terminal, deploy the contracts:
 
 ```sh
 npx hardhat run scripts/deploy.js --network localhost
 ```
 
-Finally, we can run the frontend with:
+5. Configure the frontend environment (see next section)
+
+6. Start the frontend application:
 
 ```sh
 cd frontend
@@ -41,50 +54,98 @@ npm install
 npm start
 ```
 
-Open [http://localhost:3000/](http://localhost:3000/) to see your Dapp. You will
-need to have [Coinbase Wallet](https://www.coinbase.com/wallet) or [Metamask](https://metamask.io) installed and listening to
-`localhost 8545`.
+7. Open [http://localhost:3000/](http://localhost:3000/) to view the application
 
-## User Guide
+## Environment Configuration
 
-You can find detailed instructions on using this repository and many tips in [its documentation](https://hardhat.org/tutorial).
+### IPFS Configuration with Pinata
 
-- [Writing and compiling contracts](https://hardhat.org/tutorial/writing-and-compiling-contracts/)
-- [Setting up the environment](https://hardhat.org/tutorial/setting-up-the-environment/)
-- [Testing Contracts](https://hardhat.org/tutorial/testing-contracts/)
-- [Setting up your wallet](https://hardhat.org/tutorial/boilerplate-project#how-to-use-it)
-- [Hardhat's full documentation](https://hardhat.org/docs/)
+To properly use the decentralized storage features:
 
-For a complete introduction to Hardhat, refer to [this guide](https://hardhat.org/getting-started/#overview).
+1. Create an account on [Pinata](https://www.pinata.cloud/) to get IPFS API keys
+2. Copy the `.env.example` file to a new `.env` file in the `frontend` folder
+3. Replace the placeholder values in the `.env` file with your Pinata credentials
+4. Make sure the `.env` file is included in `.gitignore` to avoid exposing your credentials
 
-## What's Included?
 
-This repository uses our recommended hardhat setup, by using our [`@nomicfoundation/hardhat-toolbox`](https://hardhat.org/hardhat-runner/plugins/nomicfoundation-hardhat-toolbox). When you use this plugin, you'll be able to:
+## Project Structure
 
-- Deploy and interact with your contracts using [ethers.js](https://docs.ethers.io/v5/) and the [`hardhat-ethers`](https://hardhat.org/hardhat-runner/plugins/nomiclabs-hardhat-ethers) plugin.
-- Test your contracts with [Mocha](https://mochajs.org/), [Chai](https://chaijs.com/) and our own [Hardhat Chai Matchers](https://hardhat.org/hardhat-chai-matchers) plugin.
-- Interact with Hardhat Network with our [Hardhat Network Helpers](https://hardhat.org/hardhat-network-helpers).
-- Verify the source code of your contracts with the [hardhat-etherscan](https://hardhat.org/hardhat-runner/plugins/nomiclabs-hardhat-etherscan) plugin.
-- Get metrics on the gas used by your contracts with the [hardhat-gas-reporter](https://github.com/cgewecke/hardhat-gas-reporter) plugin.
-- Measure your tests coverage with [solidity-coverage](https://github.com/sc-forks/solidity-coverage).
+- `contracts/`: Solidity smart contracts
+  - `Campaign.sol`: Fundraising campaign management
+  - `CampaignFactory.sol`: Factory for creating new campaigns
+  - `Token.sol`: ERC20 token implementation
+  - `MilestoneManager.sol`: Milestone management and fund release
+  - `GovernanceSystem.sol`: Voting and governance functionality
+  
+- `frontend/`: React user interface
+  - `/src/components`: UI components
+  - `/src/services`: Services (blockchain, IPFS)
+  - `/src/contexts`: Context API for state management
+  
+- `scripts/`: Deployment and initialization scripts
+- `test/`: Automated contract tests
+- `documents/`: Documentation and diagrams (excluded from repository)
 
-This project also includes [a sample frontend/Dapp](./frontend), which uses [Create React App](https://github.com/facebook/create-react-app).
+## Main Functionality
+
+### Campaign Creation
+
+Users can create fundraising campaigns by specifying:
+- Title and description
+- Images (uploaded to IPFS)
+- Fundraising goal
+- Milestones and requirements for fund release
+
+### Donations
+
+Users can:
+- Donate ETH or DNT tokens to existing campaigns
+- Track the status of their donations
+- Vote for fund release when milestones are reached
+
+### Milestone Management
+
+Funds are released progressively based on milestone completion:
+- Donors vote to confirm milestone achievements
+- Funds are unlocked only after reaching the quorum
+
+## Testing and Development
+
+To run contract tests:
+
+```sh
+npx hardhat test
+```
+
+To compile contracts:
+
+```sh
+npx hardhat compile
+```
 
 ## Troubleshooting
 
-- `Invalid nonce` errors: if you are seeing this error on the `npx hardhat node`
-  console, try resetting your Metamask account. This will reset the account's
-  transaction history and also the nonce. Open Metamask, click on your account
-  followed by `Settings > Advanced > Clear activity tab data`.
+- **Invalid nonce errors**: If you see this error on the `npx hardhat node` console, try resetting your MetaMask account. Open MetaMask, click on your account, then go to `Settings > Advanced > Clear activity tab data`.
+
+- **IPFS connection issues**: Verify that your Pinata API keys are correct and that the gateway is accessible.
+
+- **Transaction errors**: Make sure you have enough ETH in your wallet to pay for transactions.
+
+## Resources and References
+
+- [Hardhat Documentation](https://hardhat.org/docs/)
+- [Pinata IPFS Guide](https://docs.pinata.cloud/)
+- [ERC20 Standard](https://eips.ethereum.org/EIPS/eip-20)
+- [React Documentation](https://reactjs.org/docs/getting-started.html)
 
 ## Setting up your editor
 
 [Hardhat for Visual Studio Code](https://hardhat.org/hardhat-vscode) is the official Hardhat extension that adds advanced support for Solidity to VSCode. If you use Visual Studio Code, give it a try!
 
-## Getting help and updates
+## License
 
-If you need help with this project, or with Hardhat in general, please read [this guide](https://hardhat.org/hardhat-runner/docs/guides/getting-help) to learn where and how to get it.
+This project is released under the MIT License.
 
-For the latest news about Hardhat, [follow us on Twitter](https://twitter.com/HardhatHQ), and don't forget to star [our GitHub repository](https://github.com/NomicFoundation/hardhat)!
+---
 
-**Happy _building_!**
+**Note**: This project was developed for educational and demonstrative purposes. Use with caution in production environments.

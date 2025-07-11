@@ -10,7 +10,22 @@ class IPFSService {
         this.apiKey = process.env.REACT_APP_PINATA_API_KEY;
         this.apiSecret = process.env.REACT_APP_PINATA_API_SECRET;
         this.jwt = process.env.REACT_APP_PINATA_JWT;
-        this.gateway = "https://silver-left-crane-530.mypinata.cloud/ipfs/";
+        this.gateway = process.env.REACT_APP_PINATA_GATEWAY || "https://gateway.pinata.cloud/ipfs/";
+        
+        // Controllo iniziale delle configurazioni
+        this.checkConfiguration();
+    }
+    
+    /**
+     * Verifica che le configurazioni necessarie siano presenti
+     */
+    checkConfiguration() {
+        if (!this.jwt) {
+            console.warn("IPFS Service: JWT Pinata non configurato. Le funzionalità di upload non saranno disponibili.");
+        }
+        if (!this.gateway) {
+            console.warn("IPFS Service: Gateway non configurato. Verrà utilizzato il gateway pubblico.");
+        }
     }
     
     /**

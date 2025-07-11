@@ -1,6 +1,26 @@
-node_modules
-.idea
+# Documentazione e diagrammi
+/documents/
 
-#Hardhat files
-cache
-artifacts
+# Dati sensibili
+.env
+.env.*
+!.env.example
+
+# Build e cache
+/artifacts/
+/cache/
+/frontend/node_modules/
+/frontend/.parcel-cache/
+/node_modules/
+/typechain/
+/typechain-types/
+
+# File di configurazione IDE
+.vscode/
+.idea/
+
+# File di sistema
+.DS_Store
+
+# File con percorsi personali
+launch_donatio.sh

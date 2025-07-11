@@ -4,7 +4,7 @@ import "./styles/custom.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { Dapp } from "./components/Dapp"; // Mantieni il riferimento a Dapp
+import { Dapp } from "./components/Dapp"; 
 import { Web3Provider } from "./contexts/Web3Context";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));

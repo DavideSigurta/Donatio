@@ -1,3 +1,15 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=HK+Grotesk:wght@400;500;600;700&display=swap');
+
+body, .vscode-body {
+  font-family: 'HK Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
+svg text {
+  font-family: 'HK Grotesk', sans-serif !important;
+}
+</style>
+
 # Donatio Diagrams
 
 ## 1. Diagram Architettura Sistema
@@ -2017,4 +2029,104 @@ flowchart TB
         DeployScripts --> HardhatNode
         DeployScripts --> WebServices
     end
+```
+
+## 1. slides
+
+
+```mermaid
+flowchart TD
+    Users["Utenti"] --> WebApp["React dApp"]
+    WebApp <--> MetaMask["MetaMask"] & SmartContracts["Smart Contracts"] & IPFS["IPFS"]
+    MetaMask <--> Ethereum["Ethereum"]
+    SmartContracts --- Ethereum
+    
+    classDef userStyle fill:transparent,stroke:#FFFFFF,stroke-width:2px,color:#FFFFFF;
+    classDef frontendStyle fill:transparent,stroke:#FFFFFF,stroke-width:2px,color:#FFFFFF;
+    classDef blockchainStyle fill:transparent,stroke:#FFFFFF,stroke-width:2px,color:#FFFFFF;
+    classDef storageStyle fill:transparent,stroke:#FFFFFF,stroke-width:2px,color:#FFFFFF;
+    
+    class Users userStyle;
+    class WebApp,MetaMask frontendStyle;
+    class SmartContracts,Ethereum blockchainStyle;
+    class IPFS storageStyle;
+```
+
+## 2. slides
+
+
+```mermaid
+flowchart LR
+    %% Attori
+    Visitatore((VISITATORE))
+    Utente((UTENTE))
+    Creator((CREATOR))
+    Admin((ADMIN))
+    
+    %% Funzionalità essenziali
+    VisualizzaCampagne[VISUALIZZA CAMPAGNE]
+    ConnettiWallet[CONNETTI WALLET]
+    AcquistaToken[ACQUISTA TOKEN]
+    DonaFondi[DONA FONDI]
+    VotaMilestone[VOTA MILESTONE]
+    CreaCampagna[CREA CAMPAGNA]
+    GestisceMilestone[GESTISCE MILESTONE]
+    ApprovaCreator[APPROVA CREATOR]
+    
+    %% Collegamenti diretti
+    Visitatore --- VisualizzaCampagne
+    Visitatore --- ConnettiWallet
+    
+    Utente --- AcquistaToken
+    Utente --- DonaFondi
+    Utente --- VotaMilestone
+    
+    Creator --- CreaCampagna
+    Creator --- GestisceMilestone
+    
+    Admin --- ApprovaCreator
+    
+    %% Styling minimalista
+    classDef default fill:transparent,stroke:#FFFFFF,stroke-width:2px,color:#FFFFFF;
+```
+
+## 3. slides
+
+```mermaid
+flowchart RL
+    TOKEN[TOKEN]
+    TOKENEXCHANGE[TOKEN EXCHANGE]
+    CAMPAIGNFACTORY[CAMPAIGN FACTORY]
+    CAMPAIGN[CAMPAIGN]
+    GOVERNANCESYSTEM[GOVERNANCE SYSTEM]
+    TRANSACTIONREGISTRY[TRANSACTION REGISTRY]
+    CREATORREQUESTMANAGER[CREATOR REQUEST MANAGER]
+    MILESTONEMANAGER[MILESTONE MANAGER]
+    
+    %% Ogni contratto ha la sua relazione principale
+    TOKENEXCHANGE <--> TOKEN
+    
+    CAMPAIGNFACTORY --> CAMPAIGN
+    CAMPAIGNFACTORY --> TOKEN
+    CAMPAIGNFACTORY --> CREATORREQUESTMANAGER
+    
+    CAMPAIGN --> TOKEN
+    CAMPAIGN <--> GOVERNANCESYSTEM
+    CAMPAIGN --> TRANSACTIONREGISTRY
+    
+    GOVERNANCESYSTEM --> TOKEN
+    
+    MILESTONEMANAGER --> CAMPAIGN
+```
+
+## 4. slides
+
+```mermaid
+flowchart LR
+    Frontend[REACT + WEB3.JS] --> MetaMask[METAMASK WALLET]
+    Frontend --> Blockchain[HARDHAT NETWORK]
+    Frontend --> Storage[PINATA IPFS]
+    
+    Blockchain --> Contracts[SMART CONTRACTS SOLIDIY]
+    MetaMask --> Blockchain
 ```
